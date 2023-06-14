@@ -1,0 +1,101 @@
+#!/bin/bash
+
+set -euxo pipefail
+
+function get_container_id() {
+  local cpuset_output
+  cpuset_output=$(head -1 /proc/self/cpuset)
+  basename "${cpuset_output}"
+}
+
+function get_container_root_dir() {
+  local container_id="${1}"
+
+  docker.orig inspect --format '{{.GraphDriver.Data.MergedDir}}' "${container_id}"
+}
+
+function set_container_volumes() {
+  local container_id="${1}"
+
+  local docker_output
+  docker_output=$(
+    docker.orig inspect \
+      --format '{{range .Mounts}}{{printf "%s:%s\n" .Source .Destination}}{{end}}' \
+      "${container_id}"
+  )
+
+  readarray -t container_volumes <<<"${docker_output}"
+}
+
+container_id="$(get_container_id)"
+container_root_dir="$(get_container_root_dir "${container_id}")"
+set_container_volumes "${container_id}"
+readonly container_id container_root_dir container_volumes
+
+function fix_volume_arg() {
+  local source="${volume_arg%%":"*}"
+  local destination="${volume_arg#*":"}"
+
+  # Fix relative paths as docker needs absolute paths
+  # if [[ "${source}" == "./"* ]]; then
+  #   source="${PWD}/${source#"./"}"
+  # fi
+
+  if [[ "${source}" == "/"* ]]; then
+    for container_volume in "${container_volumes[@]}"; do
+      local container_volume_source="${container_volume%%":"*}"
+      local container_volume_destination="${container_volume#*":"}"
+
+      if [[ "${source}" == "${container_volume_destination}" ]]; then
+        volume_arg="${container_volume_source}:${destination}"
+        return
+      fi
+
+      if [[ "${source}" == "${container_volume_destination}/"* ]]; then
+        volume_arg="${container_volume_source}${source#"${container_volume_destination}"}:${destination}"
+        return
+      fi
+
+      # Check if there is some container_volume mounted within the source
+      # Example:
+      # First container mounts --volume "${PWD}/testfile:/home/rootless/testfile"
+      # Second container mounts --volume /home/rootless:/wd
+      # Then the second container should also mount --volume "${PWD}/testfile:/wd/testfile" (extra_arg)
+      if [[ "${container_volume_destination}" == "${source}/"* ]]; then
+        # Convert /home/rootless/testfile (container_volume_destination) to /wd/testfile (destination path)
+        extra_args+=(--volume "${container_volume_source}:${destination}/${container_volume_destination#"${source}/"}")
+      fi
+    done
+
+    volume_arg="${container_root_dir}${source}:${destination}"
+    return
+  fi
+
+  volume_arg="${source}:${destination}"
+}
+
+original_args=("$@")
+fixed_args=()
+
+extra_args=()
+fix_next_arg=false
+for arg in "${original_args[@]}"; do
+  if [[ "${fix_next_arg}" == true ]]; then
+    fix_next_arg=false
+    volume_arg="${arg}"
+    fix_volume_arg
+    arg="${volume_arg}"
+  elif [[ "${arg}" == "-v" || "${arg}" == "--volume" ]]; then
+    fix_next_arg=true
+  elif [[ "${arg}" == "-v="* || "${arg}" == "--volume="* ]]; then
+    dot_dot_volume="${arg%%"="*}"
+    volume_arg="${arg#*"="}"
+    fix_volume_arg
+    arg="${dot_dot_volume}=${volume_arg}"
+  fi
+
+  fixed_args+=("${arg}" "${extra_args[@]}")
+  extra_args=()
+done
+
+exec docker.orig "${fixed_args[@]}"
