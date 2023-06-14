@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -euxo pipefail
+set -euo pipefail
 
 function get_container_id() {
   local cpuset_output
@@ -76,6 +76,8 @@ function fix_volume_arg() {
 
 original_args=("$@")
 fixed_args=()
+
+# TODO: only piggyback on docker run, container run, create and container create
 
 extra_args=()
 fix_next_arg=false
