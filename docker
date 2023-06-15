@@ -103,14 +103,12 @@ function get_docker_options_with_value() {
   done
 }
 
-options_with_value=()
-get_docker_options_with_value options_with_value
-
 original_args=("$@")
 
 skip_next=false
 parsing="global"
 global_args=()
+docker_global_options_fetched=false
 found_first_global_positional=false
 command_args=()
 image_args=()
@@ -127,6 +125,12 @@ for i in "${!original_args[@]}"; do
 
     if [[ "${arg}" == "-"* ]]; then
       if [[ "${found_first_global_positional}" == false ]]; then
+        if [[ "${docker_global_options_fetched}" == false ]]; then
+          options_with_value=()
+          get_docker_options_with_value options_with_value
+          docker_global_options_fetched=true
+        fi
+
         for option_with_value in "${options_with_value[@]}"; do
           if [[ "${arg}" == "${option_with_value}" ]]; then
             skip_next=true
