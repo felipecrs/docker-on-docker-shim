@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+if [[ "${DOND_SHIM_DEBUG:-false}" == true ]]; then
+  set -x
+fi
+
 function get_container_id() {
   local cpuset_output
   cpuset_output=$(head -1 /proc/self/cpuset)
@@ -74,14 +78,107 @@ function fix_volume_arg() {
   volume_arg="${source}:${destination}"
 }
 
+function get_docker_options_with_value() {
+  local -n target_array="${1}"
+  shift 1
+  local command=("${@}")
+
+  local help_output
+  help_output="$(docker.orig "${command[@]}" --help)"
+
+  readarray -t help_lines <<<"${help_output}"
+  target_array=()
+  for line in "${help_lines[@]}"; do
+    # second group is the short option (optional)
+    # third group is the long option
+    if [[ "${line}" =~ ^[[:space:]]+((-[a-zA-Z]),[[:space:]])?(--[a-z0-9-]+)[[:space:]][a-z]+[[:space:]]+.*$ ]]; then
+      if [[ -n "${BASH_REMATCH[2]}" ]]; then
+        target_array+=("${BASH_REMATCH[2]}")
+      fi
+      target_array+=("${BASH_REMATCH[3]}")
+    fi
+  done
+}
+
+options_with_value=()
+get_docker_options_with_value options_with_value
+
 original_args=("$@")
+
+skip_next=false
+parsing="global"
+global_args=()
+found_first_global_positional=false
+command_args=()
+image_args=()
+for i in "${!original_args[@]}"; do
+  arg="${original_args[${i}]}"
+
+  if [[ "${parsing}" == "global" ]]; then
+    global_args+=("${arg}")
+
+    if [[ "${skip_next}" == true ]]; then
+      skip_next=false
+      continue
+    fi
+
+    if [[ "${arg}" == "-"* ]]; then
+      if [[ "${found_first_global_positional}" == false ]]; then
+        for option_with_value in "${options_with_value[@]}"; do
+          if [[ "${arg}" == "${option_with_value}" ]]; then
+            skip_next=true
+            continue
+          fi
+        done
+      fi
+      continue
+    fi
+
+    if [[ "${arg}" == "run" || "${arg}" == "create" ]]; then
+      options_with_value=()
+      get_docker_options_with_value options_with_value "${arg}"
+      parsing="command"
+    elif [[ "${arg}" == "container" ]]; then
+      found_first_global_positional=true
+      true
+    else
+      # Skip if command is not run, create, container run, or container create
+      if [[ "${DOND_SHIM_PRINT_COMMAND:-false}" == true ]]; then
+        echo docker.orig "${original_args[@]}"
+        exit 0
+      else
+        exec docker.orig "${original_args[@]}"
+      fi
+    fi
+  elif [[ "${parsing}" == "command" ]]; then
+    command_args+=("${arg}")
+
+    if [[ "${skip_next}" == true ]]; then
+      skip_next=false
+      continue
+    fi
+
+    if [[ "${arg}" == "-"* ]]; then
+      for option_with_value in "${options_with_value[@]}"; do
+        if [[ "${arg}" == "${option_with_value}" ]]; then
+          skip_next=true
+          continue
+        fi
+      done
+      continue
+    fi
+
+    # If this is reached, then the first positional argument has been found
+    parsing="image"
+  elif [[ "${parsing}" == "image" ]]; then
+    image_args+=("${arg}")
+  fi
+done
+
 fixed_args=()
-
-# TODO: only piggyback on docker run, container run, create and container create
-
 extra_args=()
 fix_next_arg=false
-for arg in "${original_args[@]}"; do
+for arg in "${command_args[@]}"; do
   if [[ "${fix_next_arg}" == true ]]; then
     fix_next_arg=false
     volume_arg="${arg}"
@@ -100,4 +197,10 @@ for arg in "${original_args[@]}"; do
   extra_args=()
 done
 
-exec docker.orig "${fixed_args[@]}"
+final_command=(docker.orig "${global_args[@]}" "${fixed_args[@]}" "${image_args[@]}")
+
+if [[ "${DOND_SHIM_PRINT_COMMAND:-false}" == true ]]; then
+  echo "${final_command[@]}"
+else
+  exec "${final_command[@]}"
+fi
