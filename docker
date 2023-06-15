@@ -31,11 +31,6 @@ function set_container_volumes() {
   readarray -t container_volumes <<<"${docker_output}"
 }
 
-container_id="$(get_container_id)"
-container_root_dir="$(get_container_root_dir "${container_id}")"
-set_container_volumes "${container_id}"
-readonly container_id container_root_dir container_volumes
-
 function fix_volume_arg() {
   local source="${volume_arg%%":"*}"
   local destination="${volume_arg#*":"}"
@@ -46,6 +41,14 @@ function fix_volume_arg() {
   # fi
 
   if [[ "${source}" == "/"* ]]; then
+    if [[ "${container_data_fetched}" == false ]]; then
+      container_id="$(get_container_id)"
+      container_root_dir="$(get_container_root_dir "${container_id}")"
+      set_container_volumes "${container_id}"
+      readonly container_id container_root_dir container_volumes
+      container_data_fetched=true
+    fi
+
     for container_volume in "${container_volumes[@]}"; do
       local container_volume_source="${container_volume%%":"*}"
       local container_volume_destination="${container_volume#*":"}"
@@ -175,6 +178,7 @@ for i in "${!original_args[@]}"; do
   fi
 done
 
+container_data_fetched=false
 fixed_args=()
 extra_args=()
 fix_next_arg=false
