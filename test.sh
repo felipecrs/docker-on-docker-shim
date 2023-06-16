@@ -27,6 +27,16 @@ for docker_version in "${docker_versions[@]}"; do
     docker --host test run --volume /wd:/wd alpine --volume /wd:/wd |
     grep --quiet "^docker.orig --host test run --volume ${PWD}:/wd alpine --volume /wd:/wd$"
 
+  echo "Same as above, but retaining read only mode"
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${PWD}:/wd" "${image_id}" \
+    docker --host test run --volume /wd:/wd:ro alpine --volume /wd:/wd |
+    grep --quiet "^docker.orig --host test run --volume ${PWD}:/wd:ro alpine --volume /wd:/wd$"
+
+  echo "Same as above, but retaining read only mode on auto added volume"
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --env DOND_SHIM_MOCK_CONTAINER_ROOT_DIR=/container-root --volume "${PWD}:/wd" --volume "${PWD}/testfile:/test/testfile" "${image_id}" \
+    docker --host test run --volume /wd:/wd:ro --volume /test:/test:ro alpine --volume /wd:/wd |
+    grep --quiet "^docker.orig --host test run --volume ${PWD}:/wd:ro --volume /container-root/test:/test:ro --volume ${PWD}/testfile:/test/testfile:ro alpine --volume /wd:/wd$"
+
   echo "Same but for container run"
   "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${PWD}:/wd" "${image_id}" \
     docker --host test container run --volume /wd:/wd alpine --volume /wd:/wd |
@@ -75,4 +85,11 @@ for docker_version in "${docker_versions[@]}"; do
   "${docker_args[@]}" --volume "${PWD}/testfile:/test/testfile" --volume "${PWD}/testfile:/test/testfile2" "${image_id}" \
     docker run --rm --volume /test:/wd ubuntu:latest bash -c 'grep "^test$" /wd/testfile && grep "^test$" /wd/testfile2 && grep "^test$" /wd/only-inside-container' >/dev/null
 
+  echo "Same test as above but with a read only volume"
+  "${docker_args[@]}" --volume "${PWD}/testfile:/test/testfile" --volume "${PWD}/testfile:/test/testfile2" "${image_id}" \
+    docker run --rm --volume /test:/wd:ro ubuntu:latest bash -c 'grep "^test$" /wd/testfile && grep "^test$" /wd/testfile2 && grep "^test$" /wd/only-inside-container' >/dev/null
+
+  echo "Same as above but with a volume that matches the parent first"
+  "${docker_args[@]}" --volume "${PWD}:/folder" --volume "${PWD}/testfile:/test/testfile" --volume "${PWD}/testfile:/test/testfile2" "${image_id}" \
+    docker run --rm --volume /folder:/test --volume /test:/wd:ro ubuntu:latest bash -c 'grep "^test$" /wd/testfile && grep "^test$" /wd/testfile2 && grep "^test$" /wd/only-inside-container' >/dev/null
 done
