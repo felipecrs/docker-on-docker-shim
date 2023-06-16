@@ -15,7 +15,11 @@ function get_container_id() {
 function get_container_root_dir() {
   local container_id="${1}"
 
-  docker.orig inspect --format '{{.GraphDriver.Data.MergedDir}}' "${container_id}"
+  if [[ -z "${DOND_SHIM_MOCK_CONTAINER_ROOT_DIR:-}" ]]; then
+    docker.orig inspect --format '{{.GraphDriver.Data.MergedDir}}' "${container_id}"
+  else
+    echo "${DOND_SHIM_MOCK_CONTAINER_ROOT_DIR}"
+  fi
 }
 
 function set_container_volumes() {
@@ -40,6 +44,7 @@ function fix_volume_arg() {
     else
       local mode_suffix=""
     fi
+    local fixed_source=""
 
     if [[ "${container_data_fetched}" == false ]]; then
       container_id="$(get_container_id)"
@@ -53,14 +58,17 @@ function fix_volume_arg() {
       local container_volume_source="${container_volume%%":"*}"
       local container_volume_destination="${container_volume#*":"}"
 
-      if [[ "${source}" == "${container_volume_destination}" ]]; then
-        source="${container_volume_source}"
-        break
-      fi
+      # TODO: Check if the container_volume_source was mounted as read-only, and force
+      # the volume_arg to be read-only as well to avoid gaining write access to a file
+      # in the host which is not allowed to the parent container.
 
-      if [[ "${source}" == "${container_volume_destination}/"* ]]; then
-        source="${container_volume_source}${source#"${container_volume_destination}"}"
-        break
+      if [[ -z "${fixed_source}" ]]; then
+        if [[ "${source}" == "${container_volume_destination}" ]]; then
+          fixed_source="${container_volume_source}"
+        elif [[ "${source}" == "${container_volume_destination}/"* ]]; then
+          fixed_source="${container_volume_source}${source#"${container_volume_destination}"}"
+          break
+        fi
       fi
 
       # Check if there is some container_volume mounted within the source
@@ -70,13 +78,14 @@ function fix_volume_arg() {
       # Then the second container should also mount --volume "${PWD}/testfile:/wd/testfile" (extra_arg)
       if [[ "${container_volume_destination}" == "${source}/"* ]]; then
         # Convert /home/rootless/testfile (container_volume_destination) to /wd/testfile (destination path)
-        extra_args+=(--volume "${container_volume_source}:${destination}/${container_volume_destination#"${source}/"}")
+        extra_args+=(--volume "${container_volume_source}:${destination}/${container_volume_destination#"${source}/"}${mode_suffix}")
       fi
     done
 
-    source="${container_root_dir}${source}"
-    volume_arg="${source}:${destination}${mode_suffix}"
-    return
+    if [[ -z "${fixed_source}" ]]; then
+      fixed_source="${container_root_dir}${source}"
+    fi
+    volume_arg="${fixed_source}:${destination}${mode_suffix}"
   fi
   # Leave it as it is if it does not match the pattern
 }
