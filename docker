@@ -32,15 +32,15 @@ function set_container_volumes() {
 }
 
 function fix_volume_arg() {
-  local source="${volume_arg%%":"*}"
-  local destination="${volume_arg#*":"}"
+  if [[ "${volume_arg}" =~ ^(/[^:]+):([^:]+)(:([^:]+))?$ ]]; then
+    local source="${BASH_REMATCH[1]}"
+    local destination="${BASH_REMATCH[2]}"
+    if [[ -n "${BASH_REMATCH[4]}" ]]; then
+      local mode_suffix=":${BASH_REMATCH[4]}"
+    else
+      local mode_suffix=""
+    fi
 
-  # Fix relative paths as docker needs absolute paths
-  # if [[ "${source}" == "./"* ]]; then
-  #   source="${PWD}/${source#"./"}"
-  # fi
-
-  if [[ "${source}" == "/"* ]]; then
     if [[ "${container_data_fetched}" == false ]]; then
       container_id="$(get_container_id)"
       container_root_dir="$(get_container_root_dir "${container_id}")"
@@ -54,13 +54,13 @@ function fix_volume_arg() {
       local container_volume_destination="${container_volume#*":"}"
 
       if [[ "${source}" == "${container_volume_destination}" ]]; then
-        volume_arg="${container_volume_source}:${destination}"
-        return
+        source="${container_volume_source}"
+        break
       fi
 
       if [[ "${source}" == "${container_volume_destination}/"* ]]; then
-        volume_arg="${container_volume_source}${source#"${container_volume_destination}"}:${destination}"
-        return
+        source="${container_volume_source}${source#"${container_volume_destination}"}"
+        break
       fi
 
       # Check if there is some container_volume mounted within the source
@@ -74,11 +74,11 @@ function fix_volume_arg() {
       fi
     done
 
-    volume_arg="${container_root_dir}${source}:${destination}"
+    source="${container_root_dir}${source}"
+    volume_arg="${source}:${destination}${mode_suffix}"
     return
   fi
-
-  volume_arg="${source}:${destination}"
+  # Leave it as it is if it does not match the pattern
 }
 
 function get_docker_options_with_value() {
