@@ -45,13 +45,15 @@ function fix_volume_arg() {
     else
       local mode_suffix=""
     fi
-  elif [[ "${volume_arg}" =~ ,?type\=bind,? ]]; then
+  elif [[ "${volume_arg}" =~ (^|,)type\=bind(,|$) ]]; then
     # There must be a better way of doing this
-    if [[ "${volume_arg}" =~ ,?source\=(/[^,]+),? ]]; then
-      local source="${BASH_REMATCH[1]}"
-      if [[ "${volume_arg}" =~ ,?destination\=(/[^,]+),? ]]; then
+    if [[ "${volume_arg}" =~ (^|,)((source|src)\=(/[^,]+))(,|$) ]]; then
+      local source_key="${BASH_REMATCH[3]}"
+      local source="${BASH_REMATCH[4]}"
+      if [[ "${volume_arg}" =~ (^|,)((destination|dst|target)\=(/[^,]+))(,|$) ]]; then
         local arg_type="mount"
-        local destination="${BASH_REMATCH[1]}"
+        local destination_key="${BASH_REMATCH[3]}"
+        local destination="${BASH_REMATCH[4]}"
       else
         # Leave it as it is if it does not match the pattern
         return
@@ -100,8 +102,8 @@ function fix_volume_arg() {
       if [[ "${arg_type}" == "volume" ]]; then
         extra_args+=(--volume "${container_volume_source}:${destination}/${container_volume_destination#"${source}/"}${mode_suffix}")
       elif [[ "${arg_type}" == "mount" ]]; then
-        local fixed_arg="${volume_arg//"source=${source}"/"source=${container_volume_source}"}"
-        fixed_arg="${fixed_arg//"destination=${destination}"/"destination=${destination}/${container_volume_destination#"${source}/"}"}"
+        local fixed_arg="${volume_arg//"${source_key}=${source}"/"${source_key}=${container_volume_source}"}"
+        fixed_arg="${fixed_arg//"${destination_key}=${destination}"/"${destination_key}=${destination}/${container_volume_destination#"${source}/"}"}"
         extra_args+=(--mount "${fixed_arg}")
       else
         echo "Unexpected arg_type: ${arg_type}" >&2
@@ -116,7 +118,7 @@ function fix_volume_arg() {
   if [[ "${arg_type}" == "volume" ]]; then
     volume_arg="${fixed_source}:${destination}${mode_suffix}"
   elif [[ "${arg_type}" == "mount" ]]; then
-    volume_arg="${volume_arg//"source=${source}"/"source=${fixed_source}"}"
+    volume_arg="${volume_arg//"${source_key}=${source}"/"${source_key}=${fixed_source}"}"
   else
     echo "Unexpected arg_type: ${arg_type}" >&2
     exit 1
