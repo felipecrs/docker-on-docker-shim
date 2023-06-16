@@ -37,6 +37,7 @@ function set_container_volumes() {
 
 function fix_volume_arg() {
   if [[ "${volume_arg}" =~ ^(/[^:]+):([^:]+)(:([^:]+))?$ ]]; then
+    local arg_type="volume"
     local source="${BASH_REMATCH[1]}"
     local destination="${BASH_REMATCH[2]}"
     if [[ -n "${BASH_REMATCH[4]}" ]]; then
@@ -44,50 +45,76 @@ function fix_volume_arg() {
     else
       local mode_suffix=""
     fi
-    local fixed_source=""
-
-    if [[ "${container_data_fetched}" == false ]]; then
-      container_id="$(get_container_id)"
-      container_root_dir="$(get_container_root_dir "${container_id}")"
-      set_container_volumes "${container_id}"
-      readonly container_id container_root_dir container_volumes
-      container_data_fetched=true
+  elif [[ "${volume_arg}" =~ ,?type\=bind,? ]]; then
+    # There must be a better way of doing this
+    if [[ "${volume_arg}" =~ ,?source\=(/[^,]+),? ]]; then
+      local source="${BASH_REMATCH[1]}"
+      if [[ "${volume_arg}" =~ ,?destination\=(/[^,]+),? ]]; then
+        local arg_type="mount"
+        local destination="${BASH_REMATCH[1]}"
+      fi
     fi
+  else
+    # Leave it as it is if it does not match the pattern
+    return
+  fi
+  local fixed_source=""
 
-    for container_volume in "${container_volumes[@]}"; do
-      local container_volume_source="${container_volume%%":"*}"
-      local container_volume_destination="${container_volume#*":"}"
+  if [[ "${container_data_fetched}" == false ]]; then
+    container_id="$(get_container_id)"
+    container_root_dir="$(get_container_root_dir "${container_id}")"
+    set_container_volumes "${container_id}"
+    readonly container_id container_root_dir container_volumes
+    container_data_fetched=true
+  fi
 
-      # TODO: Check if the container_volume_source was mounted as read-only, and force
-      # the volume_arg to be read-only as well to avoid gaining write access to a file
-      # in the host which is not allowed to the parent container.
+  for container_volume in "${container_volumes[@]}"; do
+    local container_volume_source="${container_volume%%":"*}"
+    local container_volume_destination="${container_volume#*":"}"
 
-      if [[ -z "${fixed_source}" ]]; then
-        if [[ "${source}" == "${container_volume_destination}" ]]; then
-          fixed_source="${container_volume_source}"
-        elif [[ "${source}" == "${container_volume_destination}/"* ]]; then
-          fixed_source="${container_volume_source}${source#"${container_volume_destination}"}"
-          break
-        fi
-      fi
-
-      # Check if there is some container_volume mounted within the source
-      # Example:
-      # First container mounts --volume "${PWD}/testfile:/home/rootless/testfile"
-      # Second container mounts --volume /home/rootless:/wd
-      # Then the second container should also mount --volume "${PWD}/testfile:/wd/testfile" (extra_arg)
-      if [[ "${container_volume_destination}" == "${source}/"* ]]; then
-        # Convert /home/rootless/testfile (container_volume_destination) to /wd/testfile (destination path)
-        extra_args+=(--volume "${container_volume_source}:${destination}/${container_volume_destination#"${source}/"}${mode_suffix}")
-      fi
-    done
+    # TODO: Check if the container_volume_source was mounted as read-only, and force
+    # the volume_arg to be read-only as well to avoid gaining write access to a file
+    # in the host which is not allowed to the parent container.
 
     if [[ -z "${fixed_source}" ]]; then
-      fixed_source="${container_root_dir}${source}"
+      if [[ "${source}" == "${container_volume_destination}" ]]; then
+        fixed_source="${container_volume_source}"
+      elif [[ "${source}" == "${container_volume_destination}/"* ]]; then
+        fixed_source="${container_volume_source}${source#"${container_volume_destination}"}"
+      fi
     fi
-    volume_arg="${fixed_source}:${destination}${mode_suffix}"
+
+    # Check if there is some container_volume mounted within the source
+    # Example:
+    # First container mounts --volume "${PWD}/testfile:/home/rootless/testfile"
+    # Second container mounts --volume /home/rootless:/wd
+    # Then the second container should also mount --volume "${PWD}/testfile:/wd/testfile" (extra_arg)
+    if [[ "${container_volume_destination}" == "${source}/"* ]]; then
+      # Convert /home/rootless/testfile (container_volume_destination) to /wd/testfile (destination path)
+      if [[ "${arg_type}" == "volume" ]]; then
+        extra_args+=(--volume "${container_volume_source}:${destination}/${container_volume_destination#"${source}/"}${mode_suffix}")
+      elif [[ "${arg_type}" == "mount" ]]; then
+        local fixed_arg="${volume_arg//"source=${source}"/"source=${container_volume_source}"}"
+        fixed_arg="${fixed_arg//"destination=${destination}"/"destination=${destination}/${container_volume_destination#"${source}/"}"}"
+        extra_args+=(--mount "${fixed_arg}")
+      else
+        echo "Unexpected arg_type: ${arg_type}" >&2
+        exit 1
+      fi
+    fi
+  done
+
+  if [[ -z "${fixed_source}" ]]; then
+    fixed_source="${container_root_dir}${source}"
   fi
-  # Leave it as it is if it does not match the pattern
+  if [[ "${arg_type}" == "volume" ]]; then
+    volume_arg="${fixed_source}:${destination}${mode_suffix}"
+  elif [[ "${arg_type}" == "mount" ]]; then
+    volume_arg="${volume_arg//"source=${source}"/"source=${fixed_source}"}"
+  else
+    echo "Unexpected arg_type: ${arg_type}" >&2
+    exit 1
+  fi
 }
 
 function get_docker_options_with_value() {
@@ -204,6 +231,13 @@ for arg in "${command_args[@]}"; do
   elif [[ "${arg}" == "-v" || "${arg}" == "--volume" ]]; then
     fix_next_arg=true
   elif [[ "${arg}" == "-v="* || "${arg}" == "--volume="* ]]; then
+    dot_dot_volume="${arg%%"="*}"
+    volume_arg="${arg#*"="}"
+    fix_volume_arg
+    arg="${dot_dot_volume}=${volume_arg}"
+  elif [[ "${arg}" == "--mount" ]]; then
+    fix_next_arg=true
+  elif [[ "${arg}" == "--mount="* ]]; then
     dot_dot_volume="${arg%%"="*}"
     volume_arg="${arg#*"="}"
     fix_volume_arg

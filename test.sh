@@ -32,10 +32,20 @@ for docker_version in "${docker_versions[@]}"; do
     docker --host test run --volume /wd:/wd:ro alpine --volume /wd:/wd |
     grep --quiet "^docker.orig --host test run --volume ${PWD}:/wd:ro alpine --volume /wd:/wd$"
 
-  echo "Same as above, but retaining read only mode on auto added volume"
+  echo "Same as above but with --mount"
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${PWD}:/wd" "${image_id}" \
+    docker --host test run --volume /wd:/wd:ro --mount=type=bind,source=/wd,readonly,destination=/wd2 alpine --volume /wd:/wd |
+    grep --quiet "^docker.orig --host test run --volume ${PWD}:/wd:ro --mount=type=bind,source=${PWD},readonly,destination=/wd2 alpine --volume /wd:/wd$"
+
+  echo "Same as above (without --mount), but retaining read only mode on auto added volume"
   "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --env DOND_SHIM_MOCK_CONTAINER_ROOT_DIR=/container-root --volume "${PWD}:/wd" --volume "${PWD}/testfile:/test/testfile" "${image_id}" \
     docker --host test run --volume /wd:/wd:ro --volume /test:/test:ro alpine --volume /wd:/wd |
     grep --quiet "^docker.orig --host test run --volume ${PWD}:/wd:ro --volume /container-root/test:/test:ro --volume ${PWD}/testfile:/test/testfile:ro alpine --volume /wd:/wd$"
+
+  echo "Same as above (with --mount), but retaining read only mode on auto added volume"
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --env DOND_SHIM_MOCK_CONTAINER_ROOT_DIR=/container-root --volume "${PWD}:/wd" --volume "${PWD}/testfile:/test/testfile" "${image_id}" \
+    docker --host test run --mount type=bind,source=/wd,destination=/wd,readonly --mount type=bind,source=/test,destination=/test,readonly alpine --mount type=bind,source=/wd,destination=/wd,readonly |
+    grep --quiet "^docker.orig --host test run --mount type=bind,source=${PWD},destination=/wd,readonly --mount type=bind,source=/container-root/test,destination=/test,readonly --mount type=bind,source=${PWD}/testfile,destination=/test/testfile,readonly alpine --mount type=bind,source=/wd,destination=/wd,readonly$"
 
   echo "Same but for container run"
   "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${PWD}:/wd" "${image_id}" \
@@ -80,6 +90,14 @@ for docker_version in "${docker_versions[@]}"; do
   echo "Check if mounting a volume which contains another volume adds all proper volumes"
   "${docker_args[@]}" --volume "${PWD}/testfile:/test/testfile" "${image_id}" \
     docker run --rm --volume /test:/wd ubuntu:latest grep "^test$" /wd/testfile >/dev/null
+
+  echo "With --mount"
+  "${docker_args[@]}" --volume "${PWD}/testfile:/test/testfile" "${image_id}" \
+    docker run --rm --mount type=bind,source=/test,destination=/wd ubuntu:latest grep "^test$" /wd/testfile >/dev/null
+
+  echo "With --mount shuffling order"
+  "${docker_args[@]}" --volume "${PWD}/testfile:/test/testfile" "${image_id}" \
+    docker run --rm --mount destination=/wd,source=/test,type=bind ubuntu:latest grep "^test$" /wd/testfile >/dev/null
 
   echo "Same as above but for multiple files under different volumes"
   "${docker_args[@]}" --volume "${PWD}/testfile:/test/testfile" --volume "${PWD}/testfile:/test/testfile2" "${image_id}" \
