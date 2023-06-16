@@ -52,7 +52,13 @@ function fix_volume_arg() {
       if [[ "${volume_arg}" =~ ,?destination\=(/[^,]+),? ]]; then
         local arg_type="mount"
         local destination="${BASH_REMATCH[1]}"
+      else
+        # Leave it as it is if it does not match the pattern
+        return
       fi
+    else
+      # Leave it as it is if it does not match the pattern
+      return
     fi
   else
     # Leave it as it is if it does not match the pattern
