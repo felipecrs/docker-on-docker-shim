@@ -27,6 +27,7 @@ jobs:
             export DEBUG=true
             export DOND_SHIM_DEBUG=true
           fi
+          export DOND_SHIM_DEBUG=true
           scripts/test.sh '${{ matrix.docker-version }}'
   result:
     needs: test
