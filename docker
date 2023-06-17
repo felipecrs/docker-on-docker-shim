@@ -36,8 +36,9 @@ function set_container_volumes() {
 }
 
 function fix_volume_arg() {
+  local arg_type=""
   if [[ "${volume_arg}" =~ ^(/[^:]+):([^:]+)(:([^:]+))?$ ]]; then
-    local arg_type="volume"
+    arg_type="volume"
     local source="${BASH_REMATCH[1]}"
     local destination="${BASH_REMATCH[2]}"
     if [[ -n "${BASH_REMATCH[4]}" ]]; then
@@ -51,23 +52,21 @@ function fix_volume_arg() {
       local source_key="${BASH_REMATCH[3]}"
       local source="${BASH_REMATCH[4]}"
       if [[ "${volume_arg}" =~ (^|,)((destination|dst|target)\=(/[^,]+))(,|$) ]]; then
-        local arg_type="mount"
+        arg_type="mount"
         local destination_key="${BASH_REMATCH[3]}"
         local destination="${BASH_REMATCH[4]}"
-      else
-        # Leave it as it is if it does not match the pattern
-        return
       fi
-    else
-      # Leave it as it is if it does not match the pattern
-      return
     fi
-  else
-    # Leave it as it is if it does not match the pattern
+  fi
+
+  if [[ -z "${arg_type}" ]]; then
+    # Leave volume_arg as is if it does not match any patterns
     return
   fi
+
   local fixed_source=""
 
+  # Fetch data only once and if needed
   if [[ "${container_data_fetched}" == false ]]; then
     container_id="$(get_container_id)"
     container_root_dir="$(get_container_root_dir "${container_id}")"
@@ -76,13 +75,17 @@ function fix_volume_arg() {
     container_data_fetched=true
   fi
 
+  # Check mounts of the parent container to identify whether the source
+  # is from the host filesystem or from the container itself. If it is
+  # from the host filesystem, then we need to transform the mount to
+  # match the mount from the parent container.
   for container_volume in "${container_volumes[@]}"; do
     local container_volume_source="${container_volume%%":"*}"
     local container_volume_destination="${container_volume#*":"}"
 
     # TODO: Check if the container_volume_source was mounted as read-only, and force
     # the volume_arg to be read-only as well to avoid gaining write access to a file
-    # in the host which is not allowed to the parent container.
+    # in the host which was not allowed to the parent container.
 
     if [[ -z "${fixed_source}" ]]; then
       if [[ "${source}" == "${container_volume_destination}" ]]; then
@@ -96,32 +99,33 @@ function fix_volume_arg() {
     # Example:
     # First container mounts --volume "${PWD}/testfile:/home/rootless/testfile"
     # Second container mounts --volume /home/rootless:/wd
-    # Then the second container should also mount --volume "${PWD}/testfile:/wd/testfile" (extra_arg)
+    # Then the second container should have an extra mount --volume "${PWD}/testfile:/wd/testfile"
     if [[ "${container_volume_destination}" == "${source}/"* ]]; then
       # Convert /home/rootless/testfile (container_volume_destination) to /wd/testfile (destination path)
       if [[ "${arg_type}" == "volume" ]]; then
         extra_args+=(--volume "${container_volume_source}:${destination}/${container_volume_destination#"${source}/"}${mode_suffix}")
       elif [[ "${arg_type}" == "mount" ]]; then
-        local fixed_arg="${volume_arg//"${source_key}=${source}"/"${source_key}=${container_volume_source}"}"
+        # Use replace to generate an argument with the same options as the original
+        local fixed_arg
+        fixed_arg="${volume_arg//"${source_key}=${source}"/"${source_key}=${container_volume_source}"}"
         fixed_arg="${fixed_arg//"${destination_key}=${destination}"/"${destination_key}=${destination}/${container_volume_destination#"${source}/"}"}"
         extra_args+=(--mount "${fixed_arg}")
-      else
-        echo "Unexpected arg_type: ${arg_type}" >&2
-        exit 1
       fi
     fi
   done
 
+  # If it was not possible to find a matching container_volume, then
+  # we mount relative to the container root directory on the host
+  # filesystem.
   if [[ -z "${fixed_source}" ]]; then
     fixed_source="${container_root_dir}${source}"
   fi
+
   if [[ "${arg_type}" == "volume" ]]; then
     volume_arg="${fixed_source}:${destination}${mode_suffix}"
   elif [[ "${arg_type}" == "mount" ]]; then
+    # Use replace to avoid removing other options and also to keep the order
     volume_arg="${volume_arg//"${source_key}=${source}"/"${source_key}=${fixed_source}"}"
-  else
-    echo "Unexpected arg_type: ${arg_type}" >&2
-    exit 1
   fi
 }
 
