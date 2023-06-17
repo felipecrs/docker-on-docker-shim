@@ -1,13 +1,15 @@
 ARG DOCKER_VERSION="latest"
-FROM docker:${DOCKER_VERSION} AS test
+FROM docker:${DOCKER_VERSION} AS dond-shim
 
-# Install APK deps
+# Install deps
 RUN apk add --no-cache bash
 
 # Install dond-shim
 ARG DOCKER_PATH="/usr/local/bin/docker"
 RUN mv -f "${DOCKER_PATH}" "${DOCKER_PATH}.orig"
 COPY docker "${DOCKER_PATH}"
+
+FROM dond-shim AS test
 
 # Create fixtures
 RUN mkdir -p /test && \
@@ -17,12 +19,4 @@ RUN mkdir -p /test && \
 ENTRYPOINT []
 
 # Set default stage
-FROM felipecrs/fixdockergid:latest
-
-USER root
-
-ARG DOCKER_PATH="/usr/bin/docker"
-RUN mv -f "${DOCKER_PATH}" "${DOCKER_PATH}.orig"
-COPY docker "${DOCKER_PATH}"
-
-USER rootless
+FROM dond-shim
