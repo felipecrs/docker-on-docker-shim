@@ -1,0 +1,7 @@
+services:
+  test:
+    image: alpine
+    working_dir: /wd
+    command: grep '^test$' /wd/testfile
+    volumes:
+      - .:/wd

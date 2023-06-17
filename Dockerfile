@@ -2,7 +2,7 @@ ARG DOCKER_VERSION="latest"
 FROM docker:${DOCKER_VERSION} AS dond-shim
 
 # Install deps
-RUN apk add --no-cache bash
+RUN apk add --no-cache bash docker-cli-compose
 
 # Install dond-shim
 ARG DOCKER_PATH="/usr/local/bin/docker"
