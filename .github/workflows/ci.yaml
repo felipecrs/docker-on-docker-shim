@@ -23,7 +23,7 @@ jobs:
           docker version
           docker info
       - run: |
-          if [[ "${ACTIONS_RUNNER_DEBUG}" == true ]]; then
+          if [[ '${{ runner.debug }}' == 1 ]]; then
             export DEBUG=true
             export DOND_SHIM_DEBUG=true
           fi
