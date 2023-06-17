@@ -19,15 +19,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - run: |
+      - name: Show host Docker information
+        run: |
           docker version
           docker info
-      - run: |
+      - name: Run tests with Docker ${{ matrix.docker-version }}
+        run: |
           if [[ '${{ runner.debug }}' == 1 ]]; then
             export DEBUG=true
             export DOND_SHIM_DEBUG=true
           fi
-          export DOND_SHIM_DEBUG=true
           scripts/test.sh '${{ matrix.docker-version }}'
   result:
     needs: test

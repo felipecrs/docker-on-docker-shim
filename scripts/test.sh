@@ -18,7 +18,7 @@ trap "exit 130" INT
 
 # Set docker versions from args or use default
 if [[ $# -eq 0 ]]; then
-  docker_versions=("18.09" "19.03" "20.10" "23" "24" latest)
+  docker_versions=(latest)
 else
   docker_versions=("$@")
 fi
