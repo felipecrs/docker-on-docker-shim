@@ -1,40 +1,89 @@
 # docker-on-docker-shim
 
-This is a shim that remaps volume mounts when running docker on docker. Aimed to fix <https://stackoverflow.com/questions/31381322> with no hassle.
+A shim that remaps volume mounts so they work when running docker on docker.
 
-## Compare it yourself
+## Why?
 
-Using the [`fixdockergid`](https://github.com/felipecrs/fixdockergid) image to test, where the `/usr/local/bin/fixdockergid` is only available within the container:
+Have you found yourself trying to run docker on docker, but the volume mounts don't work?
+
+This is because when you run docker on docker (i.e. reusing the docker daemon from the host within a container - `--volume /var/run/docker.sock:...`) and you execute a `docker run` command, the volume mounts (with `--volume` or `--mount`) will be interpreted by the docker daemon as paths from the host, not from the container.
+
+Well, this dilema is very common to me, and that's why I created this shim.
+
+## Use cases
+
+Although this shim can be used in many cases, some of the most common ones are:
+
+- [devcontainers](https://containers.dev/) with [docker-outside-of-docker](https://github.com/devcontainers/features/tree/main/src/docker-outside-of-docker#readme)
+- StackOverflow: [Docker in Docker cannot mount volume](https://stackoverflow.com/questions/31381322)
+
+## Highlights
+
+- Tested with all versions of docker from `18.03` to `latest`.
+- Test against containers based on `alpine`, `debian` and `ubuntu`, but it should work with any other container base.
+- The only dependency is Bash.
+- Rename the docker cli to `docker.orig` and place this shim on where the docker cli was and simply continue calling `docker` as usual.
+- Or install this shim as the `dond` command if you want and just call `dond` instead of calling `docker`.
+
+## Try it yourself
+
+In the following example, the `/usr/local/bin/dind` file is only available within the container. See how the shim makes mounting it work:
 
 ```bash
 # This does not work
-docker run --rm -u "$(id -u):$(id -g)" -v /var/run/docker.sock:/var/run/docker.sock felipecrs/fixdockergid docker run --rm -v /usr/local/bin/fixdockergid:/fixdockergid ubuntu test -f /fixdockergid
+$ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock docker:latest \
+    docker run --rm -v /usr/local/bin/dind:/dind alpine test -f /dind
 
 # A non-zero exit code indicates that it did not work
-echo $?
+$ echo $?
+1
 
-# This does
-docker run --rm -u "$(id -u):$(id -g)" -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/felipecrs/dond-shim docker run --rm -v /usr/local/bin/fixdockergid:/fixdockergid ubuntu test -f /fixdockergid
+# This works
+$ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/felipecrs/dond-shim:latest \
+    docker run --rm -v /usr/local/bin/dind:/dind alpine test -f /dind
 
 # A zero exit code indicates that it worked
-echo $?
+$ echo $?
+0
 ```
 
 ## Installation
 
-Considering your container already has the `docker` CLI installed at `/usr/bin/docker`:
+You have a few choices on how to install this shim:
+
+### As `docker`
+
+This allows you to continue calling `docker` as usual.
 
 ```dockerfile
-FROM my-image-with-docker-cli
+FROM docker:latest
 
-USER root
+# Install Bash
+RUN apk add --no-cache bash
 
-ARG DOCKER_PATH="/usr/bin/docker"
-ARG DOND_SHIM_REVISION="main"
-RUN mv -f "${DOCKER_PATH}" "${DOCKER_PATH}.orig" && \
-  curl -fsSL "https://github.com/felipecrs/docker-on-docker-shim/raw/${DOND_SHIM_REVISION}/docker" \
-    --output "${DOCKER_PATH}" && \
-  chmod +x "${DOCKER_PATH}"
+# Rename the docker cli to docker.orig
+ARG DOCKER_PATH="/usr/local/bin/docker"
+RUN mv -f "${DOCKER_PATH}" "${DOCKER_PATH}.orig"
 
-USER non-root-user
+# Install dond-shim at the same path as the original docker cli
+ARG DOND_SHIM_VERSION="0.5.0"
+ADD "https://github.com/felipecrs/docker-on-docker-shim/raw/v${DOND_SHIM_VERSION}/docker" "${DOCKER_PATH}"
+RUN chmod +x "${DOCKER_PATH}"
+```
+
+### As `dond`
+
+So that you can call `dond` instead of calling `docker`.
+
+```dockerfile
+FROM docker:latest
+
+# Install Bash
+RUN apk add --no-cache bash
+
+# Install dond-shim to /usr/local/bin/dond
+ARG DOND_SHIM_VERSION="0.5.0"
+ARG DOND_SHIM_PATH="/usr/local/bin/dond"
+ADD "https://github.com/felipecrs/docker-on-docker-shim/raw/v${DOND_SHIM_VERSION}/docker" "${DOND_SHIM_PATH}"
+RUN chmod +x "${DOND_SHIM_PATH}"
 ```
