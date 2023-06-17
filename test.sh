@@ -1,26 +1,35 @@
-#!/bin/bash
-
-set -euo pipefail
+#!/usr/bin/env bash
 
 if [[ "${DEBUG:-false}" == true ]]; then
-  set -x
-  export DOND_SHIM_DEBUG=true
+  set -o xtrace
 fi
 
-# Set docker versions from args or use defaults
+# Exit on any kind of errors
+# https://unix.stackexchange.com/questions/23026
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+set -o functrace
+shopt -s inherit_errexit
+
+# Ensure CTRL+C properly aborts the script
+trap "exit 130" INT
+
+# Set docker versions from args or use default
 if [[ $# -eq 0 ]]; then
   docker_versions=("18.09" "19.03" "20.10" "23" "24" latest)
 else
   docker_versions=("$@")
 fi
+readonly docker_versions
+
+readonly docker_args=(docker run --rm --env DOND_SHIM_DEBUG --volume /var/run/docker.sock:/var/run/docker.sock)
 
 for docker_version in "${docker_versions[@]}"; do
   echo "Testing with docker version: ${docker_version}"
 
   image_id="$(docker build --target test --build-arg "DOCKER_VERSION=${docker_version}" --quiet .)"
-
-  # shellcheck disable=SC2312
-  docker_args=(docker run --rm --env DOND_SHIM_DEBUG --entrypoint= --volume /var/run/docker.sock:/var/run/docker.sock)
 
   echo "Do not change global options or after the image"
   "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${PWD}:/wd" "${image_id}" \

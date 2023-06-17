@@ -13,6 +13,9 @@ COPY docker "${DOCKER_PATH}"
 RUN mkdir -p /test && \
   echo test | tee /test/only-inside-container
 
+# Cleanup entrypoint to make execution faster
+ENTRYPOINT []
+
 # Set default stage
 FROM felipecrs/fixdockergid:latest
 

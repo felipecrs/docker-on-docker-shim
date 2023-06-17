@@ -1,6 +1,29 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-set -euo pipefail
+if [[ "${DOND_SHIM_DEBUG:-false}" == true ]]; then
+  set -o xtrace
+fi
+
+# Exit on any kind of errors
+# https://unix.stackexchange.com/questions/23026
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+set -o functrace
+shopt -s inherit_errexit
+
+function echo_error() {
+  echo "ERROR(dond-shim):" "${@}" >&2
+}
+
+function error() {
+  echo_error "${@}"
+  exit 1
+}
+
+# Ensure the user knows that the error was originated from the shim
+trap 'echo_error "Uncaught error at line ${LINENO}"' ERR
 
 # Finds all docker options that take a value from the --help output and
 # stores them in the docker_options_with_value array.
@@ -164,13 +187,16 @@ function fix_volume_arg() {
   fi
 }
 
-if [[ "${DOND_SHIM_DEBUG:-false}" == true ]]; then
-  set -x
-fi
+script_path="$(
+  cd -- "$(dirname "$0")" >/dev/null 2>&1
+  pwd -P
+)"
+readonly script_path
 
 # Parse supported environment variables
 readonly mock_container_root_on_host="${DOND_SHIM_MOCK_CONTAINER_ROOT_ON_HOST:-}"
 readonly print_command="${DOND_SHIM_PRINT_COMMAND:-false}"
+
 if [[ -n "${DOND_SHIM_DOCKER_PATH:-}" ]]; then
   # If DOND_SHIM_DOCKER_PATH is set, then use it to call the docker
   readonly docker_path="${DOND_SHIM_DOCKER_PATH}"
@@ -184,9 +210,13 @@ else
 fi
 
 # Ensure docker_path is different from this script to avoid infinite loop
-if [[ "${0}" == "${docker_path}" ]]; then
-  echo "Error: docker_path (${docker_path}) is pointing to dond-shim (${0})"
-  exit 1
+if [[ "${script_path}" == "${docker_path}" ]]; then
+  error "docker_path (${docker_path}) points to this script (${script_path})"
+fi
+
+# Ensure docker_path actually exists
+if ! command -v "${docker_path}" >/dev/null; then
+  error "docker_path (${docker_path}) points to a non-existing file or command"
 fi
 
 # Save original arguments
