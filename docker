@@ -2,9 +2,35 @@
 
 set -euo pipefail
 
-if [[ "${DOND_SHIM_DEBUG:-false}" == true ]]; then
-  set -x
-fi
+function set_docker_options_with_value() {
+  local command=("${@}")
+
+  local help_output
+  help_output="$("${docker_path}" "${command[@]}" --help)"
+
+  local help_lines
+  readarray -t help_lines <<<"${help_output}"
+  docker_options_with_value=()
+  for line in "${help_lines[@]}"; do
+    # second group is the short option (optional)
+    # third group is the long option
+    if [[ "${line}" =~ ^[[:space:]]+((-[a-zA-Z]),[[:space:]])?(--[a-z0-9-]+)[[:space:]][a-z]+[[:space:]]+.*$ ]]; then
+      if [[ -n "${BASH_REMATCH[2]}" ]]; then
+        docker_options_with_value+=("${BASH_REMATCH[2]}")
+      fi
+      docker_options_with_value+=("${BASH_REMATCH[3]}")
+    fi
+  done
+}
+
+function run_docker() {
+  if [[ "${print_command}" == true ]]; then
+    echo "${docker_path}" "${@}"
+    exit 0
+  else
+    exec "${docker_path}" "${@}"
+  fi
+}
 
 function get_container_id() {
   local cpuset_output
@@ -12,27 +38,27 @@ function get_container_id() {
   basename "${cpuset_output}"
 }
 
-function get_container_root_dir() {
+function get_container_root_on_host() {
   local container_id="${1}"
 
-  if [[ -z "${DOND_SHIM_MOCK_CONTAINER_ROOT_DIR:-}" ]]; then
-    docker.orig inspect --format '{{.GraphDriver.Data.MergedDir}}' "${container_id}"
+  if [[ -z "${mock_container_root_on_host}" ]]; then
+    "${docker_path}" inspect --format '{{.GraphDriver.Data.MergedDir}}' "${container_id}"
   else
-    echo "${DOND_SHIM_MOCK_CONTAINER_ROOT_DIR}"
+    echo "${mock_container_root_on_host}"
   fi
 }
 
-function set_container_volumes() {
-  local container_id="${1}"
+function set_parent_container_mounts() {
+  local -r container_id="${1}"
 
   local docker_output
   docker_output=$(
-    docker.orig inspect \
+    "${docker_path}" inspect \
       --format '{{range .Mounts}}{{printf "%s:%s\n" .Source .Destination}}{{end}}' \
       "${container_id}"
   )
 
-  readarray -t container_volumes <<<"${docker_output}"
+  readarray -t parent_container_mounts <<<"${docker_output}"
 }
 
 function fix_volume_arg() {
@@ -69,9 +95,9 @@ function fix_volume_arg() {
   # Fetch data only once and if needed
   if [[ "${container_data_fetched}" == false ]]; then
     container_id="$(get_container_id)"
-    container_root_dir="$(get_container_root_dir "${container_id}")"
-    set_container_volumes "${container_id}"
-    readonly container_id container_root_dir container_volumes
+    container_root_dir="$(get_container_root_on_host "${container_id}")"
+    set_parent_container_mounts "${container_id}"
+    readonly container_id container_root_dir parent_container_mounts
     container_data_fetched=true
   fi
 
@@ -79,7 +105,7 @@ function fix_volume_arg() {
   # is from the host filesystem or from the container itself. If it is
   # from the host filesystem, then we need to transform the mount to
   # match the mount from the parent container.
-  for container_volume in "${container_volumes[@]}"; do
+  for container_volume in "${parent_container_mounts[@]}"; do
     local container_volume_source="${container_volume%%":"*}"
     local container_volume_destination="${container_volume#*":"}"
 
@@ -103,13 +129,13 @@ function fix_volume_arg() {
     if [[ "${container_volume_destination}" == "${source}/"* ]]; then
       # Convert /home/rootless/testfile (container_volume_destination) to /wd/testfile (destination path)
       if [[ "${arg_type}" == "volume" ]]; then
-        extra_args+=(--volume "${container_volume_source}:${destination}/${container_volume_destination#"${source}/"}${mode_suffix}")
+        next_extra_args+=(--volume "${container_volume_source}:${destination}/${container_volume_destination#"${source}/"}${mode_suffix}")
       elif [[ "${arg_type}" == "mount" ]]; then
         # Use replace to generate an argument with the same options as the original
         local fixed_arg
         fixed_arg="${volume_arg//"${source_key}=${source}"/"${source_key}=${container_volume_source}"}"
         fixed_arg="${fixed_arg//"${destination_key}=${destination}"/"${destination_key}=${destination}/${container_volume_destination#"${source}/"}"}"
-        extra_args+=(--mount "${fixed_arg}")
+        next_extra_args+=(--mount "${fixed_arg}")
       fi
     fi
   done
@@ -129,141 +155,144 @@ function fix_volume_arg() {
   fi
 }
 
-function get_docker_options_with_value() {
-  local -n target_array="${1}"
-  shift 1
-  local command=("${@}")
+if [[ "${DOND_SHIM_DEBUG:-false}" == true ]]; then
+  set -x
+fi
 
-  local help_output
-  help_output="$(docker.orig "${command[@]}" --help)"
+# Parse supported environment variables
+readonly mock_container_root_on_host="${DOND_SHIM_MOCK_CONTAINER_ROOT_ON_HOST:-}"
+readonly docker_path="${DOND_SHIM_DOCKER_PATH:-"docker.orig"}"
+readonly print_command="${DOND_SHIM_PRINT_COMMAND:-false}"
 
-  readarray -t help_lines <<<"${help_output}"
-  target_array=()
-  for line in "${help_lines[@]}"; do
-    # second group is the short option (optional)
-    # third group is the long option
-    if [[ "${line}" =~ ^[[:space:]]+((-[a-zA-Z]),[[:space:]])?(--[a-z0-9-]+)[[:space:]][a-z]+[[:space:]]+.*$ ]]; then
-      if [[ -n "${BASH_REMATCH[2]}" ]]; then
-        target_array+=("${BASH_REMATCH[2]}")
-      fi
-      target_array+=("${BASH_REMATCH[3]}")
-    fi
-  done
-}
-
+# Save original arguments
 original_args=("$@")
+readonly original_args
 
-skip_next=false
-parsing="global"
+# Exit early if the original command does not have at least 3 args, like
+# run --volume=/tmp:/tmp ubuntu
+if [[ "${#original_args[@]}" -lt 3 ]]; then
+  run_docker "${original_args[@]}"
+fi
+
+# We need to identify which arguments are global, which are for the container
+# run/create command and which are for the image. That's to avoid transforming
+# arguments that are not meant to be transformed (we should only transform
+# arguments that are meant to be passed to the container run/create command).
+
+# Example: --host whatever container run
 global_args=()
-docker_global_options_fetched=false
-found_first_global_positional=false
+# Example: --volume /tmp:/tmp ubuntu
 command_args=()
+# Example: bash -c "echo hello"
 image_args=()
-for i in "${!original_args[@]}"; do
-  arg="${original_args[${i}]}"
 
-  if [[ "${parsing}" == "global" ]]; then
+skip_next_arg=false
+next_arg_type="global"
+docker_command=()
+global_options_with_value_fetched=false
+command_options_with_value_fetched=false
+first_global_positional_arg_found=false
+
+for arg in "${original_args[@]}"; do
+  if [[ "${next_arg_type}" == "global" ]]; then
     global_args+=("${arg}")
 
-    if [[ "${skip_next}" == true ]]; then
-      skip_next=false
+    if [[ "${skip_next_arg}" == true ]]; then
+      skip_next_arg=false
       continue
     fi
 
     if [[ "${arg}" == "-"* ]]; then
-      if [[ "${found_first_global_positional}" == false ]]; then
-        if [[ "${docker_global_options_fetched}" == false ]]; then
-          options_with_value=()
-          get_docker_options_with_value options_with_value
-          docker_global_options_fetched=true
+      # Only parse global options before the first positional command, because
+      # docker does not allow an option between container and run/create like
+      # this: docker container --host whatever run
+      if [[ "${first_global_positional_arg_found}" == false ]]; then
+        # Only fetch docker global options when needed and only once
+        if [[ "${global_options_with_value_fetched}" == false ]]; then
+          set_docker_options_with_value
+          global_options_with_value_fetched=true
         fi
 
-        for option_with_value in "${options_with_value[@]}"; do
-          if [[ "${arg}" == "${option_with_value}" ]]; then
-            skip_next=true
-            continue
+        # Skip next argument if it is a global option that accepts a value
+        for option in "${docker_options_with_value[@]}"; do
+          if [[ "${arg}" == "${option}" ]]; then
+            skip_next_arg=true
+            break
           fi
         done
       fi
-      continue
-    fi
-
-    if [[ "${arg}" == "run" || "${arg}" == "create" ]]; then
-      options_with_value=()
-      get_docker_options_with_value options_with_value "${arg}"
-      parsing="command"
+    elif [[ "${arg}" == "run" || "${arg}" == "create" ]]; then
+      docker_command+=("${arg}")
+      next_arg_type="command"
     elif [[ "${arg}" == "container" ]]; then
-      found_first_global_positional=true
-      true
+      docker_command+=("${arg}")
+      first_global_positional_arg_found=true
     else
       # Skip if command is not run, create, container run, or container create
-      if [[ "${DOND_SHIM_PRINT_COMMAND:-false}" == true ]]; then
-        echo docker.orig "${original_args[@]}"
-        exit 0
-      else
-        exec docker.orig "${original_args[@]}"
-      fi
+      run_docker "${original_args[@]}"
     fi
-  elif [[ "${parsing}" == "command" ]]; then
+  elif [[ "${next_arg_type}" == "command" ]]; then
     command_args+=("${arg}")
 
-    if [[ "${skip_next}" == true ]]; then
-      skip_next=false
+    if [[ "${skip_next_arg}" == true ]]; then
+      skip_next_arg=false
       continue
     fi
 
     if [[ "${arg}" == "-"* ]]; then
-      for option_with_value in "${options_with_value[@]}"; do
-        if [[ "${arg}" == "${option_with_value}" ]]; then
-          skip_next=true
+      # Only fetch docker command options when needed and only once
+      if [[ "${command_options_with_value_fetched}" == false ]]; then
+        set_docker_options_with_value "${docker_command[@]}"
+        command_options_with_value_fetched=true
+      fi
+
+      for option in "${docker_options_with_value[@]}"; do
+        if [[ "${arg}" == "${option}" ]]; then
+          skip_next_arg=true
           continue
         fi
       done
-      continue
+    else
+      # First non-option argument is the image
+      next_arg_type="image"
     fi
-
-    # If this is reached, then the first positional argument has been found
-    parsing="image"
-  elif [[ "${parsing}" == "image" ]]; then
+  elif [[ "${next_arg_type}" == "image" ]]; then
     image_args+=("${arg}")
   fi
 done
+readonly global_args command_args image_args
+unset next_arg_type skip_next_arg docker_command global_options_with_value_fetched \
+  command_options_with_value_fetched first_global_positional_arg_found \
+  docker_options_with_value
 
+# Finally it's time to transform the volume|mount arguments
 container_data_fetched=false
-fixed_args=()
-extra_args=()
 fix_next_arg=false
+fixed_args=()
+next_extra_args=()
+
 for arg in "${command_args[@]}"; do
   if [[ "${fix_next_arg}" == true ]]; then
     fix_next_arg=false
     volume_arg="${arg}"
     fix_volume_arg
     arg="${volume_arg}"
-  elif [[ "${arg}" == "-v" || "${arg}" == "--volume" ]]; then
+  elif [[ "${arg}" == "-v" || "${arg}" == "--volume" || "${arg}" == "--mount" ]]; then
     fix_next_arg=true
   elif [[ "${arg}" == "-v="* || "${arg}" == "--volume="* ]]; then
-    dot_dot_volume="${arg%%"="*}"
+    option_name="${arg%%"="*}"
     volume_arg="${arg#*"="}"
     fix_volume_arg
-    arg="${dot_dot_volume}=${volume_arg}"
-  elif [[ "${arg}" == "--mount" ]]; then
-    fix_next_arg=true
+    arg="${option_name}=${volume_arg}"
   elif [[ "${arg}" == "--mount="* ]]; then
-    dot_dot_volume="${arg%%"="*}"
+    option_name="${arg%%"="*}"
     volume_arg="${arg#*"="}"
     fix_volume_arg
-    arg="${dot_dot_volume}=${volume_arg}"
+    arg="${option_name}=${volume_arg}"
   fi
 
-  fixed_args+=("${arg}" "${extra_args[@]}")
-  extra_args=()
+  fixed_args+=("${arg}" "${next_extra_args[@]}")
+  next_extra_args=()
 done
 
-final_command=(docker.orig "${global_args[@]}" "${fixed_args[@]}" "${image_args[@]}")
-
-if [[ "${DOND_SHIM_PRINT_COMMAND:-false}" == true ]]; then
-  echo "${final_command[@]}"
-else
-  exec "${final_command[@]}"
-fi
+run_docker "${global_args[@]}" "${fixed_args[@]}" "${image_args[@]}"
