@@ -17,3 +17,6 @@ jobs:
       - uses: actions/checkout@v2
       - run: |
           scripts/test.sh '${{ matrix.docker-version }}'
+  result:
+    needs: test
+    runs-on: ubuntu-latest
