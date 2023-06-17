@@ -169,10 +169,6 @@ function fix_volume_arg() {
     local container_volume_source="${container_volume%%":"*}"
     local container_volume_destination="${container_volume#*":"}"
 
-    # TODO: Check if the container_volume_source was mounted as read-only, and force
-    # the volume_arg to be read-only as well to avoid gaining write access to a file
-    # in the host which was not allowed to the parent container.
-
     if [[ -z "${fixed_source}" ]]; then
       if [[ "${source}" == "${container_volume_destination}" ]]; then
         fixed_source="${container_volume_source}"
