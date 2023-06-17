@@ -16,6 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: |
+          docker version
+          docker info
+      - run: |
           scripts/test.sh '${{ matrix.docker-version }}'
   result:
     needs: test
