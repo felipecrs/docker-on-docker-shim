@@ -113,7 +113,7 @@ function set_parent_container_mounts() {
   local docker_output
   docker_output=$(
     "${docker_path}" inspect \
-      --format '{{range .Mounts}}{{printf "%s:%s\n" .Source .Destination}}{{end}}' \
+      --format '{{range .Mounts}}{{if eq .Type "bind"}}{{printf "%s:%s\n" .Source .Destination}}{{end}}{{end}}' \
       "${container_id}"
   )
 
