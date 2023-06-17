@@ -20,3 +20,6 @@ jobs:
   result:
     needs: test
     runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "All tests passed!"
