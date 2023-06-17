@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        docker-version: [18.09, 19.03, 20.10, 23, 24, latest]
+        docker-version: ["18.09", "19.03", "20.10", "23", "24", latest]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
