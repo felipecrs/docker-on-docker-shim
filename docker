@@ -69,8 +69,8 @@ function run_docker() {
 function set_container_id() {
   local result
 
-  result="$(head -1 /proc/1/cpuset)"
-  result="$(basename "${result}")"
+  # Adjusted a bit from: https://stackoverflow.com/a/75261366/12156188
+  result="$(grep 'name=systemd' /proc/self/mountinfo | cut -d/ -f3)"
 
   # Sanity check
   if [[ "${result}" =~ ^[a-z0-9]{12,128}$ ]]; then
