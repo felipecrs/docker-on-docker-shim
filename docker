@@ -19,11 +19,18 @@ function echo_error() {
 
 function error() {
   echo_error "${@}"
+  uncaught_error=false
   exit 1
 }
 
 # Ensure the user knows that the error was originated from the shim
-trap 'echo_error "Uncaught error at line ${LINENO}"' ERR
+function handle_error_trap() {
+  if [[ "${uncaught_error:-true}" == true ]]; then
+    echo_error "Uncaught error at line ${LINENO}"
+  fi
+}
+
+trap handle_error_trap ERR
 
 # Finds all docker options that take a value from the --help output and
 # stores them in the docker_options_with_value array.
@@ -59,30 +66,44 @@ function run_docker() {
 }
 
 # Gets the current/parent container id on the host.
-function get_container_id() {
-  local cpuset_output
-  cpuset_output=$(head -1 /proc/self/cpuset)
-  basename "${cpuset_output}"
+function set_container_id() {
+  local result
+
+  result="$(head -1 /proc/1/cpuset)"
+  result="$(basename "${result}")"
+
+  # Sanity check
+  if [[ "${result}" =~ ^[a-z0-9]{12,128}$ ]]; then
+    readonly container_id="${result}"
+  else
+    error "Could not get parent container id"
+  fi
 }
 
 # Gets the root directory of the current/parent container on the host
 # filesystem.
-function get_container_root_on_host() {
-  local container_id="${1}"
+function set_container_root_on_host() {
+  local result
 
   if [[ -z "${mock_container_root_on_host}" ]]; then
-    "${docker_path}" inspect "${container_id}" >&2
-    "${docker_path}" inspect --format '{{.GraphDriver.Data.MergedDir}}' "${container_id}"
+    result="$(
+      "${docker_path}" inspect --format '{{.GraphDriver.Data.MergedDir}}' "${container_id}"
+    )"
   else
-    echo "${mock_container_root_on_host}"
+    result="${mock_container_root_on_host}"
+  fi
+
+  # Sanity check
+  if [[ "${result}" =~ ^(/[^/]+)+$ ]]; then
+    readonly container_root_on_host="${result}"
+  else
+    error "Could not get parent container root on host"
   fi
 }
 
 # Reads the mounts of the current/parent container and stores them in the
 # parent_container_mounts array.
 function set_parent_container_mounts() {
-  local -r container_id="${1}"
-
   local docker_output
   docker_output=$(
     "${docker_path}" inspect \
@@ -91,6 +112,7 @@ function set_parent_container_mounts() {
   )
 
   readarray -t parent_container_mounts <<<"${docker_output}"
+  readonly parent_container_mounts
 }
 
 # Performs the necessary transformations to the volume/mount argument.
@@ -127,10 +149,9 @@ function fix_volume_arg() {
 
   # Fetch data only once and if needed
   if [[ "${container_data_fetched}" == false ]]; then
-    container_id="$(get_container_id)"
-    container_root_dir="$(get_container_root_on_host "${container_id}")"
-    set_parent_container_mounts "${container_id}"
-    readonly container_id container_root_dir parent_container_mounts
+    set_container_id
+    set_container_root_on_host
+    set_parent_container_mounts
     container_data_fetched=true
   fi
 
@@ -177,7 +198,7 @@ function fix_volume_arg() {
   # we mount relative to the container root directory on the host
   # filesystem.
   if [[ -z "${fixed_source}" ]]; then
-    fixed_source="${container_root_dir}${source}"
+    fixed_source="${container_root_on_host}${source}"
   fi
 
   if [[ "${arg_type}" == "volume" ]]; then
