@@ -69,10 +69,14 @@ function run_docker() {
 function set_container_id() {
   local result
 
-  cat /proc/self/mountinfo >&2
-
-  # Adjusted a bit from: https://stackoverflow.com/a/75261366/12156188
-  result="$(grep 'name=systemd' /proc/self/mountinfo | cut -d/ -f3)"
+  local mount_info_lines=()
+  readarray -t mount_info_lines </proc/self/mountinfo
+  for line in "${mount_info_lines[@]}"; do
+    if [[ "${line}" =~ /([a-z0-9]{12,128})/resolv.conf" " ]]; then
+      result="${BASH_REMATCH[1]}"
+    fi
+  done
+  unset mount_info_lines
 
   # Sanity check
   if [[ "${result}" =~ ^[a-z0-9]{12,128}$ ]]; then
