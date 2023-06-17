@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+# Finds all docker options that take a value from the --help output and
+# stores them in the docker_options_with_value array.
 function set_docker_options_with_value() {
   local command=("${@}")
 
@@ -23,21 +25,25 @@ function set_docker_options_with_value() {
   done
 }
 
+# Runs the docker command with the given arguments.
 function run_docker() {
   if [[ "${print_command}" == true ]]; then
     echo "${docker_path}" "${@}"
     exit 0
   else
-    exec "${docker_path}" "${@}"
+    DOND_SHIM_SKIP=true exec "${docker_path}" "${@}"
   fi
 }
 
+# Gets the current/parent container id on the host.
 function get_container_id() {
   local cpuset_output
   cpuset_output=$(head -1 /proc/self/cpuset)
   basename "${cpuset_output}"
 }
 
+# Gets the root directory of the current/parent container on the host
+# filesystem.
 function get_container_root_on_host() {
   local container_id="${1}"
 
@@ -48,6 +54,8 @@ function get_container_root_on_host() {
   fi
 }
 
+# Reads the mounts of the current/parent container and stores them in the
+# parent_container_mounts array.
 function set_parent_container_mounts() {
   local -r container_id="${1}"
 
@@ -61,6 +69,7 @@ function set_parent_container_mounts() {
   readarray -t parent_container_mounts <<<"${docker_output}"
 }
 
+# Performs the necessary transformations to the volume/mount argument.
 function fix_volume_arg() {
   local arg_type=""
   if [[ "${volume_arg}" =~ ^(/[^:]+):([^:]+)(:([^:]+))?$ ]]; then
@@ -161,12 +170,33 @@ fi
 
 # Parse supported environment variables
 readonly mock_container_root_on_host="${DOND_SHIM_MOCK_CONTAINER_ROOT_ON_HOST:-}"
-readonly docker_path="${DOND_SHIM_DOCKER_PATH:-"docker.orig"}"
 readonly print_command="${DOND_SHIM_PRINT_COMMAND:-false}"
+if [[ -n "${DOND_SHIM_DOCKER_PATH:-}" ]]; then
+  # If DOND_SHIM_DOCKER_PATH is set, then use it to call the docker
+  readonly docker_path="${DOND_SHIM_DOCKER_PATH}"
+elif [[ "${0}" == *"/docker" ]]; then
+  # If this shim is named docker, then we expect the original docker to be
+  # named docker.orig
+  readonly docker_path="docker.orig"
+else
+  # If this shim is not named docker, then we can simply call docker
+  readonly docker_path="docker"
+fi
+
+# Ensure docker_path is different from this script to avoid infinite loop
+if [[ "${0}" == "${docker_path}" ]]; then
+  echo "Error: docker_path (${docker_path}) is pointing to dond-shim (${0})"
+  exit 1
+fi
 
 # Save original arguments
 original_args=("$@")
 readonly original_args
+
+# Avoid infinite loop if this script calls itself at a different path
+if [[ "${DOND_SHIM_SKIP:-false}" == true ]]; then
+  exec "${docker_path}" "${original_args[@]}"
+fi
 
 # Exit early if the original command does not have at least 3 args, like
 # run --volume=/tmp:/tmp ubuntu
