@@ -23,6 +23,10 @@ jobs:
           docker version
           docker info
       - run: |
+          if [[ "${ACTIONS_RUNNER_DEBUG}" == true ]]; then
+            export DEBUG=true
+            export DOND_SHIM_DEBUG=true
+          fi
           scripts/test.sh '${{ matrix.docker-version }}'
   result:
     needs: test
