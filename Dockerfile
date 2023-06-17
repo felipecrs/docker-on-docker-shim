@@ -7,7 +7,7 @@ RUN apk add --no-cache bash
 # Install dond-shim
 ARG DOCKER_PATH="/usr/local/bin/docker"
 RUN mv -f "${DOCKER_PATH}" "${DOCKER_PATH}.orig"
-COPY docker "${DOCKER_PATH}"
+COPY dond "${DOCKER_PATH}"
 
 FROM dond-shim AS test
 
