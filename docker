@@ -187,10 +187,7 @@ function fix_volume_arg() {
   fi
 }
 
-script_path="$(
-  cd -- "$(dirname "$0")" >/dev/null 2>&1
-  pwd -P
-)"
+script_path="$(realpath "$0")"
 readonly script_path
 
 # Parse supported environment variables

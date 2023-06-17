@@ -26,53 +26,60 @@ readonly docker_versions
 
 readonly docker_args=(docker run --rm --env DOND_SHIM_DEBUG --volume /var/run/docker.sock:/var/run/docker.sock)
 
+# Find fixtures directory
+script_path=$(realpath "$0")
+script_dir=$(dirname "${script_path}")
+fixtures_dir="$(realpath "${script_dir}/../tests/fixtures")"
+readonly fixtures_dir
+unset script_path script_dir
+
 for docker_version in "${docker_versions[@]}"; do
   echo "Testing with docker version: ${docker_version}"
 
   image_id="$(docker build --target test --build-arg "DOCKER_VERSION=${docker_version}" --quiet .)"
 
   echo "Do not change global options or after the image"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${PWD}:/wd" "${image_id}" \
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
     docker --host test run --volume /wd:/wd alpine --volume /wd:/wd |
-    grep --quiet "^docker.orig --host test run --volume ${PWD}:/wd alpine --volume /wd:/wd$"
+    grep --quiet "^docker.orig --host test run --volume ${fixtures_dir}:/wd alpine --volume /wd:/wd$"
 
   echo "Same as above, but retaining read only mode"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${PWD}:/wd" "${image_id}" \
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
     docker --host test run --volume /wd:/wd:ro alpine --volume /wd:/wd |
-    grep --quiet "^docker.orig --host test run --volume ${PWD}:/wd:ro alpine --volume /wd:/wd$"
+    grep --quiet "^docker.orig --host test run --volume ${fixtures_dir}:/wd:ro alpine --volume /wd:/wd$"
 
   echo "Same as above but with --mount"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${PWD}:/wd" "${image_id}" \
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
     docker --host test run --volume /wd:/wd:ro --mount=type=bind,source=/wd,readonly,destination=/wd2 alpine --volume /wd:/wd |
-    grep --quiet "^docker.orig --host test run --volume ${PWD}:/wd:ro --mount=type=bind,source=${PWD},readonly,destination=/wd2 alpine --volume /wd:/wd$"
+    grep --quiet "^docker.orig --host test run --volume ${fixtures_dir}:/wd:ro --mount=type=bind,source=${fixtures_dir},readonly,destination=/wd2 alpine --volume /wd:/wd$"
 
   echo "Same as above (without --mount), but retaining read only mode on auto added volume"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --env DOND_SHIM_MOCK_CONTAINER_ROOT_ON_HOST=/container-root --volume "${PWD}:/wd" --volume "${PWD}/testfile:/test/testfile" "${image_id}" \
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --env DOND_SHIM_MOCK_CONTAINER_ROOT_ON_HOST=/container-root --volume "${fixtures_dir}:/wd" --volume "${fixtures_dir}/testfile:/test/testfile" "${image_id}" \
     docker --host test run --volume /wd:/wd:ro --volume /test:/test:ro alpine --volume /wd:/wd |
-    grep --quiet "^docker.orig --host test run --volume ${PWD}:/wd:ro --volume /container-root/test:/test:ro --volume ${PWD}/testfile:/test/testfile:ro alpine --volume /wd:/wd$"
+    grep --quiet "^docker.orig --host test run --volume ${fixtures_dir}:/wd:ro --volume /container-root/test:/test:ro --volume ${fixtures_dir}/testfile:/test/testfile:ro alpine --volume /wd:/wd$"
 
   echo "Same as above (with --mount src and target, dst), but retaining read only mode on auto added volume"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --env DOND_SHIM_MOCK_CONTAINER_ROOT_ON_HOST=/container-root --volume "${PWD}:/wd" --volume "${PWD}/testfile:/test/testfile" "${image_id}" \
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --env DOND_SHIM_MOCK_CONTAINER_ROOT_ON_HOST=/container-root --volume "${fixtures_dir}:/wd" --volume "${fixtures_dir}/testfile:/test/testfile" "${image_id}" \
     docker --host test run --mount type=bind,src=/wd,target=/wd,readonly --mount type=bind,source=/test,dst=/test,readonly alpine --mount type=bind,source=/wd,destination=/wd,readonly |
-    grep --quiet "^docker.orig --host test run --mount type=bind,src=${PWD},target=/wd,readonly --mount type=bind,source=/container-root/test,dst=/test,readonly --mount type=bind,source=${PWD}/testfile,dst=/test/testfile,readonly alpine --mount type=bind,source=/wd,destination=/wd,readonly$"
+    grep --quiet "^docker.orig --host test run --mount type=bind,src=${fixtures_dir},target=/wd,readonly --mount type=bind,source=/container-root/test,dst=/test,readonly --mount type=bind,source=${fixtures_dir}/testfile,dst=/test/testfile,readonly alpine --mount type=bind,source=/wd,destination=/wd,readonly$"
 
   echo "Same but for container run"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${PWD}:/wd" "${image_id}" \
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
     docker --host test container run --volume /wd:/wd alpine --volume /wd:/wd |
-    grep --quiet "^docker.orig --host test container run --volume ${PWD}:/wd alpine --volume /wd:/wd$"
+    grep --quiet "^docker.orig --host test container run --volume ${fixtures_dir}:/wd alpine --volume /wd:/wd$"
 
   echo "Same but for create"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${PWD}:/wd" "${image_id}" \
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
     docker --host test create --volume /wd:/wd alpine --volume /wd:/wd |
-    grep --quiet "^docker.orig --host test create --volume ${PWD}:/wd alpine --volume /wd:/wd$"
+    grep --quiet "^docker.orig --host test create --volume ${fixtures_dir}:/wd alpine --volume /wd:/wd$"
 
   echo "Same but container create"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${PWD}:/wd" "${image_id}" \
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
     docker --host test container create --volume /wd:/wd alpine --volume /wd:/wd |
-    grep --quiet "^docker.orig --host test container create --volume ${PWD}:/wd alpine --volume /wd:/wd$"
+    grep --quiet "^docker.orig --host test container create --volume ${fixtures_dir}:/wd alpine --volume /wd:/wd$"
 
   echo "Do not do anything for other commands"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${PWD}:/wd" "${image_id}" \
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
     docker --host test whatever --volume /wd:/wd alpine --volume /wd:/wd |
     grep --quiet "^docker.orig --host test whatever --volume /wd:/wd alpine --volume /wd:/wd$"
 
@@ -89,34 +96,34 @@ for docker_version in "${docker_versions[@]}"; do
     docker run --rm --volume=/test/only-inside-container:/only-inside-container ubuntu:latest grep "^test$" /only-inside-container >/dev/null
 
   echo "Check if mounting a volume which is already a volume gets fixed"
-  "${docker_args[@]}" --volume "${PWD}:/wd" "${image_id}" \
+  "${docker_args[@]}" --volume "${fixtures_dir}:/wd" "${image_id}" \
     docker run --rm --volume /wd:/wd ubuntu:latest grep "^test$" /wd/testfile >/dev/null
 
   echo "Same as above but for a file within the volume"
-  "${docker_args[@]}" --volume "${PWD}:/wd" "${image_id}" \
+  "${docker_args[@]}" --volume "${fixtures_dir}:/wd" "${image_id}" \
     docker run --rm --volume /wd/testfile:/wd/testfile ubuntu:latest grep "^test$" /wd/testfile >/dev/null
 
   echo "Check if mounting a volume which contains another volume adds all proper volumes"
-  "${docker_args[@]}" --volume "${PWD}/testfile:/test/testfile" "${image_id}" \
+  "${docker_args[@]}" --volume "${fixtures_dir}/testfile:/test/testfile" "${image_id}" \
     docker run --rm --volume /test:/wd ubuntu:latest grep "^test$" /wd/testfile >/dev/null
 
   echo "With --mount"
-  "${docker_args[@]}" --volume "${PWD}/testfile:/test/testfile" "${image_id}" \
+  "${docker_args[@]}" --volume "${fixtures_dir}/testfile:/test/testfile" "${image_id}" \
     docker run --rm --mount type=bind,source=/test,destination=/wd ubuntu:latest grep "^test$" /wd/testfile >/dev/null
 
   echo "With --mount shuffling order"
-  "${docker_args[@]}" --volume "${PWD}/testfile:/test/testfile" "${image_id}" \
+  "${docker_args[@]}" --volume "${fixtures_dir}/testfile:/test/testfile" "${image_id}" \
     docker run --rm --mount destination=/wd,source=/test,type=bind ubuntu:latest grep "^test$" /wd/testfile >/dev/null
 
   echo "Same as above but for multiple files under different volumes"
-  "${docker_args[@]}" --volume "${PWD}/testfile:/test/testfile" --volume "${PWD}/testfile:/test/testfile2" "${image_id}" \
+  "${docker_args[@]}" --volume "${fixtures_dir}/testfile:/test/testfile" --volume "${fixtures_dir}/testfile:/test/testfile2" "${image_id}" \
     docker run --rm --volume /test:/wd ubuntu:latest bash -c 'grep "^test$" /wd/testfile && grep "^test$" /wd/testfile2 && grep "^test$" /wd/only-inside-container' >/dev/null
 
   echo "Same test as above but with a read only volume"
-  "${docker_args[@]}" --volume "${PWD}/testfile:/test/testfile" --volume "${PWD}/testfile:/test/testfile2" "${image_id}" \
+  "${docker_args[@]}" --volume "${fixtures_dir}/testfile:/test/testfile" --volume "${fixtures_dir}/testfile:/test/testfile2" "${image_id}" \
     docker run --rm --volume /test:/wd:ro ubuntu:latest bash -c 'grep "^test$" /wd/testfile && grep "^test$" /wd/testfile2 && grep "^test$" /wd/only-inside-container' >/dev/null
 
   echo "Same as above but with a volume that matches the parent first"
-  "${docker_args[@]}" --volume "${PWD}:/folder" --volume "${PWD}/testfile:/test/testfile" --volume "${PWD}/testfile:/test/testfile2" "${image_id}" \
+  "${docker_args[@]}" --volume "${fixtures_dir}:/folder" --volume "${fixtures_dir}/testfile:/test/testfile" --volume "${fixtures_dir}/testfile:/test/testfile2" "${image_id}" \
     docker run --rm --volume /folder:/test --volume /test:/wd:ro ubuntu:latest bash -c 'grep "^test$" /wd/testfile && grep "^test$" /wd/testfile2 && grep "^test$" /wd/only-inside-container' >/dev/null
 done
