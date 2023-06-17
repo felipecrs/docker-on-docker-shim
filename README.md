@@ -20,7 +20,7 @@ Although this shim can be used in many cases, some of the most common ones are:
 ## Highlights
 
 - Tested with all versions of docker from `18.03` to `latest`.
-- Test against containers based on `alpine`, `debian` and `ubuntu`, but it should work with any other container base.
+- Tested against containers based on `alpine`, `debian` and `ubuntu`, but it should work with any other container base.
 - The only dependency is Bash.
 - Rename the docker cli to `docker.orig` and place this shim on where the docker cli was and simply continue calling `docker` as usual.
 - Or install this shim as the `dond` command if you want and just call `dond` instead of calling `docker`.
