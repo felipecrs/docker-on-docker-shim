@@ -58,6 +58,11 @@ for docker_version in "${docker_versions[@]}"; do
     docker --host test run --volume /wd:/wd:ro --volume /test:/test:ro alpine --volume /wd:/wd |
     grep --quiet "^docker.orig --host test run --volume ${fixtures_dir}:/wd:ro --volume /container-root/test:/test:ro --volume ${fixtures_dir}/testfile:/test/testfile:ro alpine --volume /wd:/wd$"
 
+  echo "Same as above but should not auto add mounts which are not bind mounts"
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --env DOND_SHIM_MOCK_CONTAINER_ROOT_ON_HOST=/container-root --volume "${fixtures_dir}:/wd" --volume "${fixtures_dir}/testfile:/test/testfile" --mount type=tmpfs,target=/test/tmpfsdir "${image_id}" \
+    docker --host test run --volume /wd:/wd:ro --volume /test:/test:ro alpine --volume /wd:/wd |
+    grep --quiet "^docker.orig --host test run --volume ${fixtures_dir}:/wd:ro --volume /container-root/test:/test:ro --volume ${fixtures_dir}/testfile:/test/testfile:ro alpine --volume /wd:/wd$"
+
   echo "Same as above (with --mount src and target, dst), but retaining read only mode on auto added volume"
   "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --env DOND_SHIM_MOCK_CONTAINER_ROOT_ON_HOST=/container-root --volume "${fixtures_dir}:/wd" --volume "${fixtures_dir}/testfile:/test/testfile" "${image_id}" \
     docker --host test run --mount type=bind,src=/wd,target=/wd,readonly --mount type=bind,source=/test,dst=/test,readonly alpine --mount type=bind,source=/wd,destination=/wd,readonly |
