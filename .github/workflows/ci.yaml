@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -15,10 +15,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        docker-version: ["18.03", "18.09", "19.03", "20.10", "23", "24", latest]
+        docker-version:
+          - "18.03"
+          - "18.09"
+          - "19.03"
+          - "20.10"
+          - "23"
+          - "24"
+          - "25"
+          - "26"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Show host Docker information
         run: |
           docker version
