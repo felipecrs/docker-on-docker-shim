@@ -24,6 +24,7 @@ jobs:
           - "24"
           - "25"
           - "26"
+          - "27"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
