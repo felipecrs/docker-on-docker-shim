@@ -131,4 +131,13 @@ for docker_version in "${docker_versions[@]}"; do
   echo "Same as above but with a volume that matches the parent first"
   "${docker_args[@]}" --volume "${fixtures_dir}:/folder" --volume "${fixtures_dir}/testfile:/test/testfile" --volume "${fixtures_dir}/testfile:/test/testfile2" "${image_id}" \
     docker run --rm --volume /folder:/test --volume /test:/wd:ro ubuntu:latest bash -c 'grep "^test$" /wd/testfile && grep "^test$" /wd/testfile2 && grep "^test$" /wd/only-inside-container' >/dev/null
+
+  echo "With named volume"
+  volume_name=$(docker volume create --opt type=none --opt device="${fixtures_dir}" --opt o=bind)
+  trap 'docker volume rm -f "${volume_name}" >/dev/null' EXIT
+  # this confirms the volume works in the parent container prior to the shim
+  "${docker_args[@]}" --volume "${volume_name}:/wd" "${image_id}" \
+    grep "^test$" /wd/testfile >/dev/null
+  "${docker_args[@]}" --volume "${volume_name}:/wd" "${image_id}" \
+    docker run --rm --volume /wd:/wd ubuntu:latest grep "^test$" /wd/testfile >/dev/null
 done
