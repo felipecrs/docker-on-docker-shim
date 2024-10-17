@@ -40,8 +40,12 @@ function set_docker_options_with_value() {
   local help_output
   help_output="$("${docker_path}" "${command[@]}" --help)"
 
-  local help_lines
-  readarray -t help_lines <<<"${help_output}"
+  local help_lines=()
+  if [[ -n "${help_output}" ]]; then
+    readarray -t help_lines <<<"${help_output}"
+  fi
+  unset help_output
+
   docker_options_with_value=()
   for line in "${help_lines[@]}"; do
     # second group is the short option (optional)
@@ -110,14 +114,20 @@ function set_container_root_on_host() {
 # Reads the mounts of the current/parent container and stores them in the
 # parent_container_mounts array.
 function set_parent_container_mounts() {
-  local docker_output
-  docker_output=$(
+  local inspect_output
+  inspect_output=$(
     "${docker_path}" inspect \
       --format '{{range .Mounts}}{{if or (eq .Type "bind") (eq .Type "volume")}}{{printf "%s:%s\n" .Source .Destination}}{{end}}{{end}}' \
       "${container_id}"
   )
 
-  readarray -t parent_container_mounts <<<"${docker_output}"
+  if [[ -n "${inspect_output}" ]]; then
+    readarray -t parent_container_mounts <<<"${inspect_output}"
+  else
+    parent_container_mounts=()
+  fi
+  unset inspect_output
+
   readonly parent_container_mounts
 }
 
