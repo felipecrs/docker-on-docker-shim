@@ -87,3 +87,9 @@ ARG DOND_SHIM_PATH="/usr/local/bin/dond"
 ADD "https://github.com/felipecrs/docker-on-docker-shim/raw/v${DOND_SHIM_VERSION}/dond" "${DOND_SHIM_PATH}"
 RUN chmod 755 "${DOND_SHIM_PATH}"
 ```
+
+## Docker Compose
+
+Unfortunately, using the shim through Docker Compose is not possible, since Docker Compose interacts with the docker daemon directly and does not call the `docker` cli.
+
+It should be theoretically possible to develop a shim for Docker Compose, but I have not done it yet.
