@@ -14,7 +14,7 @@ Well, this dilema is very common to me, and that's why I created this shim.
 
 Although this shim can be used in many cases, some of the most common ones are:
 
-- [devcontainers](https://containers.dev/) with [docker-outside-of-docker](https://github.com/devcontainers/features/tree/main/src/docker-outside-of-docker#readme)
+- [devcontainers](https://containers.dev/) with [docker-outside-of-docker](https://github.com/devcontainers/features/tree/master/src/docker-outside-of-docker#readme)
 - StackOverflow: [Docker in Docker cannot mount volume](https://stackoverflow.com/questions/31381322)
 
 ## Highlights
