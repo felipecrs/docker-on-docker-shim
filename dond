@@ -96,9 +96,23 @@ function set_container_root_on_host() {
   local result
 
   if [[ -z "${mock_container_root_on_host}" ]]; then
-    result="$(
-      "${docker_path}" inspect --format '{{.GraphDriver.Data.MergedDir}}' "${container_id}"
+    local docker_info
+    docker_info="$(
+      "${docker_path}" info --format '{{.Driver}}|{{.DockerRootDir}}'
     )"
+
+    local storage_driver="${docker_info%%"|"*}"
+    local docker_data_dir="${docker_info#*"|"}"
+
+    if [[ "${storage_driver}" == "overlay2" ]]; then
+      result="$(
+        "${docker_path}" inspect --format '{{.GraphDriver.Data.MergedDir}}' "${container_id}"
+      )"
+    elif [[ "${storage_driver}" == "overlayfs" ]]; then
+      result="${docker_data_dir}/rootfs/overlayfs/${container_id}"
+    else
+      error "Unsupported storage driver: ${storage_driver}"
+    fi
   else
     result="${mock_container_root_on_host}"
   fi
