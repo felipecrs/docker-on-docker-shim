@@ -15,6 +15,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        storage-driver:
+          - "overlay2"
+          - "overlayfs"
         docker-version:
           - "18.03"
           - "18.09"
@@ -25,9 +28,28 @@ jobs:
           - "25"
           - "26"
           - "27"
+          - "28"
+          - "29"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Set host Docker storage driver
+        run: |
+          set -euxo pipefail
+          if [ -f /etc/docker/daemon.json ]; then
+            daemon_json=$(cat /etc/docker/daemon.json)
+          else
+            daemon_json='{}'
+          fi
+          if [ '${{ matrix.storage-driver }}' == "overlay2" ]; then
+            echo "${daemon_json}" | jq '.features["containerd-snapshotter"]=false' | sudo tee /etc/docker/daemon.json
+          elif [ '${{ matrix.storage-driver }}' == "overlayfs" ]; then
+            echo "${daemon_json}" | jq '.features["containerd-snapshotter"]=true' | sudo tee /etc/docker/daemon.json
+          else
+            echo "Unknown storage driver: ${{ matrix.storage-driver }}"
+            exit 1
+          fi
+          sudo systemctl restart docker
       - name: Show host Docker information
         run: |
           docker version
