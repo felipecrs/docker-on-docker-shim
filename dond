@@ -69,50 +69,58 @@ function run_docker() {
   fi
 }
 
-# Sets container info by parsing /proc/self/mountinfo:
-# - container_id: the current container id
-# - container_root_on_host: the root directory of the container on the host filesystem
-function set_container_info() {
-  local line upperdir docker_data_dir
+# Gets the current/parent container id on the host.
+function set_container_id() {
+  local result
 
-  {
-    # The root overlay mount with upperdir is always on the first line
-    if read -r line; then
-      if [[ "${line}" =~ ^[0-9]+[[:space:]][0-9]+[[:space:]][0-9]+:[0-9]+[[:space:]]/[[:space:]]/[[:space:]].*upperdir=(/[^,]+) ]]; then
-        upperdir="${BASH_REMATCH[1]}"
-      fi
+  local mount_info_lines=()
+  readarray -t mount_info_lines </proc/self/mountinfo
+  for line in "${mount_info_lines[@]}"; do
+    if [[ "${line}" =~ /([a-z0-9]{12,128})/resolv.conf" " ]]; then
+      result="${BASH_REMATCH[1]}"
     fi
+  done
+  unset mount_info_lines
 
-    # Find the resolv.conf mount to get container info
-    while read -r line; do
-      if [[ "${line}" =~ [[:space:]](/[^[:space:]]+)/containers/([a-z0-9]{12,128})/resolv\.conf[[:space:]] ]]; then
-        docker_data_dir="${BASH_REMATCH[1]}"
-        readonly container_id="${BASH_REMATCH[2]}"
-        break
-      fi
-    done
-  } </proc/self/mountinfo
-
-  if [[ -z "${container_id}" ]]; then
+  # Sanity check
+  if [[ "${result}" =~ ^[a-z0-9]{12,128}$ ]]; then
+    readonly container_id="${result}"
+  else
     error "Could not get parent container id"
   fi
+}
 
-  if [[ -n "${mock_container_root_on_host}" ]]; then
-    readonly container_root_on_host="${mock_container_root_on_host}"
-    return
-  fi
+# Gets the root directory of the current/parent container on the host
+# filesystem.
+function set_container_root_on_host() {
+  local result
 
-  if [[ "${upperdir}" == *"/overlay2/"*"/diff" ]]; then
-    readonly container_root_on_host="${upperdir%"/diff"}/merged"
-  elif [[ "${upperdir}" == *"/io.containerd.snapshotter.v1.overlayfs/"* ]]; then
-    if [[ -z "${docker_data_dir}" ]]; then
-      error "Could not determine docker data directory from mountinfo"
+  if [[ -z "${mock_container_root_on_host}" ]]; then
+    local docker_info
+    docker_info="$(
+      "${docker_path}" info --format '{{.Driver}}|{{.DockerRootDir}}'
+    )"
+
+    local storage_driver="${docker_info%%"|"*}"
+    local docker_data_dir="${docker_info#*"|"}"
+
+    if [[ "${storage_driver}" == "overlay2" ]]; then
+      result="$(
+        "${docker_path}" inspect --format '{{.GraphDriver.Data.MergedDir}}' "${container_id}"
+      )"
+    elif [[ "${storage_driver}" == "overlayfs" ]]; then
+      result="${docker_data_dir}/rootfs/overlayfs/${container_id}"
+    else
+      error "Unsupported storage driver: ${storage_driver}"
     fi
-    readonly container_root_on_host="${docker_data_dir}/rootfs/overlayfs/${container_id}"
+  else
+    result="${mock_container_root_on_host}"
   fi
 
   # Sanity check
-  if [[ ! "${container_root_on_host:-}" =~ ^(/[^/]+)+$ ]]; then
+  if [[ "${result}" =~ ^(/[^/]+)+$ ]]; then
+    readonly container_root_on_host="${result}"
+  else
     error "Could not get parent container root on host"
   fi
 }
@@ -171,7 +179,8 @@ function fix_volume_arg() {
 
   # Fetch data only once and if needed
   if [[ "${container_data_fetched}" == false ]]; then
-    set_container_info
+    set_container_id
+    set_container_root_on_host
     set_parent_container_mounts
     container_data_fetched=true
   fi
