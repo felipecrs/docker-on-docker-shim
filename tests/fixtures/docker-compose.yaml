@@ -1,0 +1,6 @@
+services:
+  test:
+    image: busybox
+    volumes:
+      - /wd:/wd
+    command: [grep, -q, ^test$$, /wd/testfile]
