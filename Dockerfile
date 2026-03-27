@@ -16,6 +16,10 @@ ARG DOCKER_PATH="/usr/local/bin/docker"
 RUN mv -f "${DOCKER_PATH}" "${DOCKER_PATH}.orig"
 COPY --from=dond-shim-bin /dond "${DOCKER_PATH}"
 
+ARG DOCKER_COMPOSE_PATH="/usr/local/bin/docker-compose"
+RUN mv -f "${DOCKER_COMPOSE_PATH}" "${DOCKER_COMPOSE_PATH}.orig"
+COPY ./dond-compose "${DOCKER_COMPOSE_PATH}"
+
 FROM dond-shim AS test
 
 # Create fixtures
