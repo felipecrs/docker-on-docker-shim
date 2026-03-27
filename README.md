@@ -66,7 +66,7 @@ ARG DOCKER_PATH="/usr/local/bin/docker"
 RUN mv -f "${DOCKER_PATH}" "${DOCKER_PATH}.orig"
 
 # Install dond-shim at the same path as the original docker cli
-ARG DOND_SHIM_VERSION="0.7.1"
+ARG DOND_SHIM_VERSION="0.8.2"
 ADD --chmod=755 "https://github.com/felipecrs/docker-on-docker-shim/raw/v${DOND_SHIM_VERSION}/dond" "${DOCKER_PATH}"
 ```
 
@@ -81,7 +81,7 @@ FROM docker:latest
 RUN apk add --no-cache bash
 
 # Install dond-shim to /usr/local/bin/dond
-ARG DOND_SHIM_VERSION="0.7.1"
+ARG DOND_SHIM_VERSION="0.8.2"
 ARG DOND_SHIM_PATH="/usr/local/bin/dond"
 ADD --chmod=755 "https://github.com/felipecrs/docker-on-docker-shim/raw/v${DOND_SHIM_VERSION}/dond" "${DOND_SHIM_PATH}" "${DOND_SHIM_PATH}"
 ```
