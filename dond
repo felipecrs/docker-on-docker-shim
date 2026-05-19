@@ -99,7 +99,7 @@ function set_container_root_on_host() {
     local inspect_result
     if ! inspect_result="$(
       "${docker_path}" inspect \
-        --format '{{.Driver}}|{{.ResolvConfPath}}|{{with (index . "GraphDriver")}}{{index .Data "MergedDir"}}{{end}}' \
+        --format '{{.Driver}}|{{.ResolvConfPath}}' \
         "${container_id}" 2>/dev/null
     )"; then
       sidecar_mode=true
@@ -107,12 +107,14 @@ function set_container_root_on_host() {
     fi
 
     local storage_driver="${inspect_result%%"|"*}"
-    local rest="${inspect_result#*"|"}"
-    local resolv_conf_path="${rest%%"|"*}"
-    local merged_dir="${rest#*"|"}"
+    local resolv_conf_path="${inspect_result#*"|"}"
 
     if [[ "${storage_driver}" == "overlay2" ]]; then
-      result="${merged_dir}"
+      result="$(
+        "${docker_path}" inspect \
+          --format '{{.GraphDriver.Data.MergedDir}}' \
+          "${container_id}"
+      )"
     elif [[ "${storage_driver}" == "overlayfs" ]]; then
       local docker_data_dir="${resolv_conf_path%"/containers/"*}"
       result="${docker_data_dir}/rootfs/overlayfs/${container_id}"

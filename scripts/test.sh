@@ -96,14 +96,13 @@ for docker_version in "${docker_versions[@]}"; do
   echo "In sidecar mode (e.g. GitLab CI Docker-in-Docker service), volume args pass through unchanged"
   sidecar_dind_id="$(docker run --detach --privileged --env DOCKER_TLS_CERTDIR="" docker:dind)"
   until docker exec "${sidecar_dind_id}" docker info >/dev/null 2>&1; do sleep 1; done
-  sidecar_dind_ip="$(docker inspect --format '{{.NetworkSettings.IPAddress}}' "${sidecar_dind_id}")"
   "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true \
-    --env DOCKER_HOST="tcp://${sidecar_dind_ip}:2375" \
+    --link "${sidecar_dind_id}:dind" --env DOCKER_HOST="tcp://dind:2375" \
     --volume "${fixtures_dir}:/wd" "${image_id}" \
     docker run --volume /wd:/wd busybox |
     grep -q "^docker.orig run --volume /wd:/wd busybox$"
   docker rm --force "${sidecar_dind_id}" >/dev/null
-  unset sidecar_dind_id sidecar_dind_ip
+  unset sidecar_dind_id
 
   echo "Check if docker on docker is working"
   "${docker_args[@]}" "${image_id}" \
