@@ -98,7 +98,7 @@ function set_container_root_on_host() {
   local inspect_result
   if ! inspect_result="$(
     "${docker_path}" inspect \
-      --format '{{.Driver}}|{{.ResolvConfPath}}|{{.GraphDriver.Data.MergedDir}}{{range .Mounts}}{{if or (eq .Type "bind") (eq .Type "volume")}}{{printf "\n%s:%s" .Source .Destination}}{{end}}{{end}}' \
+      --format '{{printf "%s\n%s\n%s" .Driver .ResolvConfPath .GraphDriver.Data.MergedDir}}{{range .Mounts}}{{if or (eq .Type "bind") (eq .Type "volume")}}{{printf "\n%s:%s" .Source .Destination}}{{end}}{{end}}' \
       "${container_id}" 2>/dev/null
   )"; then
     likely_sidecar_docker=true
@@ -109,10 +109,9 @@ function set_container_root_on_host() {
   readarray -t inspect_lines <<<"${inspect_result}"
   unset inspect_result
 
-  local storage_driver="${inspect_lines[0]%%"|"*}"
-  local rest="${inspect_lines[0]#*"|"}"
-  local resolv_conf_path="${rest%%"|"*}"
-  local merged_dir="${rest#*"|"}"
+  local storage_driver="${inspect_lines[0]}"
+  local resolv_conf_path="${inspect_lines[1]}"
+  local merged_dir="${inspect_lines[2]}"
 
   if [[ "${storage_driver}" == "overlay2" ]]; then
     result="${merged_dir}"
@@ -123,8 +122,8 @@ function set_container_root_on_host() {
     error "Unsupported storage driver: ${storage_driver}"
   fi
 
-  if [[ "${#inspect_lines[@]}" -gt 1 ]]; then
-    parent_container_mounts=("${inspect_lines[@]:1}")
+  if [[ "${#inspect_lines[@]}" -gt 3 ]]; then
+    parent_container_mounts=("${inspect_lines[@]:3}")
   else
     parent_container_mounts=()
   fi
