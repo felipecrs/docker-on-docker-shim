@@ -98,7 +98,7 @@ function set_container_root_on_host() {
   local inspect_result
   if ! inspect_result="$(
     "${docker_path}" inspect \
-      --format '{{printf "%s\n%s\n%s" .Driver .ResolvConfPath .GraphDriver.Data.MergedDir}}{{range .Mounts}}{{if or (eq .Type "bind") (eq .Type "volume")}}{{printf "\n%s:%s" .Source .Destination}}{{end}}{{end}}' \
+      --format '{{printf "%s\n%s\n" .Driver .ResolvConfPath}}{{with .GraphDriver}}{{printf "%s" .Data.MergedDir}}{{end}}{{range .Mounts}}{{if or (eq .Type "bind") (eq .Type "volume")}}{{printf "\n%s:%s" .Source .Destination}}{{end}}{{end}}' \
       "${container_id}" 2>/dev/null
   )"; then
     likely_sidecar_docker=true
