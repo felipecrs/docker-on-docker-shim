@@ -36,6 +36,7 @@ unset script_path script_dir
 # this avoids messing with the test output during the tests itself
 echo "Pulling docker images used in tests"
 docker pull -q busybox
+docker pull -q docker:dind
 
 for docker_version in "${docker_versions[@]}"; do
   echo "Testing with docker version: ${docker_version}"
@@ -91,6 +92,18 @@ for docker_version in "${docker_versions[@]}"; do
   "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
     docker --host test whatever --volume /wd:/wd busybox --volume /wd:/wd |
     grep -q "^docker.orig --host test whatever --volume /wd:/wd busybox --volume /wd:/wd$"
+
+  echo "In sidecar mode (e.g. GitLab CI Docker-in-Docker service), volume args pass through unchanged"
+  sidecar_dind_id="$(docker run --detach --privileged --env DOCKER_TLS_CERTDIR="" docker:dind)"
+  until docker exec "${sidecar_dind_id}" docker info >/dev/null 2>&1; do sleep 1; done
+  sidecar_dind_ip="$(docker inspect --format '{{.NetworkSettings.IPAddress}}' "${sidecar_dind_id}")"
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true \
+    --env DOCKER_HOST="tcp://${sidecar_dind_ip}:2375" \
+    --volume "${fixtures_dir}:/wd" "${image_id}" \
+    docker run --volume /wd:/wd busybox |
+    grep -q "^docker.orig run --volume /wd:/wd busybox$"
+  docker rm --force "${sidecar_dind_id}" >/dev/null
+  unset sidecar_dind_id sidecar_dind_ip
 
   echo "Check if docker on docker is working"
   "${docker_args[@]}" "${image_id}" \
