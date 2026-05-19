@@ -36,6 +36,9 @@ unset script_path script_dir
 # this avoids messing with the test output during the tests itself
 echo "Pulling docker images used in tests"
 docker pull -q busybox
+for docker_version in "${docker_versions[@]}"; do
+  docker pull -q "docker:${docker_version}"
+done
 
 for docker_version in "${docker_versions[@]}"; do
   echo "Testing with docker version: ${docker_version}"
@@ -58,19 +61,19 @@ for docker_version in "${docker_versions[@]}"; do
     grep -q "^docker.orig --host test run --volume ${fixtures_dir}:/wd:ro --mount=type=bind,source=${fixtures_dir},readonly,destination=/wd2 busybox --volume /wd:/wd$"
 
   echo "Same as above (without --mount), but retaining read only mode on auto added volume"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --env DOND_SHIM_MOCK_CONTAINER_ROOT_ON_HOST=/container-root --volume "${fixtures_dir}:/wd" --volume "${fixtures_dir}/testfile:/test/testfile" "${image_id}" \
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" --volume "${fixtures_dir}:/test" --volume "${fixtures_dir}/testfile:/test/testfile" "${image_id}" \
     docker --host test run --volume /wd:/wd:ro --volume /test:/test:ro busybox --volume /wd:/wd |
-    grep -q "^docker.orig --host test run --volume ${fixtures_dir}:/wd:ro --volume /container-root/test:/test:ro --volume ${fixtures_dir}/testfile:/test/testfile:ro busybox --volume /wd:/wd$"
+    grep -q "^docker.orig --host test run --volume ${fixtures_dir}:/wd:ro --volume ${fixtures_dir}:/test:ro --volume ${fixtures_dir}/testfile:/test/testfile:ro busybox --volume /wd:/wd$"
 
   echo "Same as above but should not auto add mounts which are not bind mounts"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --env DOND_SHIM_MOCK_CONTAINER_ROOT_ON_HOST=/container-root --volume "${fixtures_dir}:/wd" --volume "${fixtures_dir}/testfile:/test/testfile" --mount type=tmpfs,target=/test/tmpfsdir "${image_id}" \
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" --volume "${fixtures_dir}:/test" --volume "${fixtures_dir}/testfile:/test/testfile" --mount type=tmpfs,target=/test/tmpfsdir "${image_id}" \
     docker --host test run --volume /wd:/wd:ro --volume /test:/test:ro busybox --volume /wd:/wd |
-    grep -q "^docker.orig --host test run --volume ${fixtures_dir}:/wd:ro --volume /container-root/test:/test:ro --volume ${fixtures_dir}/testfile:/test/testfile:ro busybox --volume /wd:/wd$"
+    grep -q "^docker.orig --host test run --volume ${fixtures_dir}:/wd:ro --volume ${fixtures_dir}:/test:ro --volume ${fixtures_dir}/testfile:/test/testfile:ro busybox --volume /wd:/wd$"
 
   echo "Same as above (with --mount src and target, dst), but retaining read only mode on auto added volume"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --env DOND_SHIM_MOCK_CONTAINER_ROOT_ON_HOST=/container-root --volume "${fixtures_dir}:/wd" --volume "${fixtures_dir}/testfile:/test/testfile" "${image_id}" \
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" --volume "${fixtures_dir}:/test" --volume "${fixtures_dir}/testfile:/test/testfile" "${image_id}" \
     docker --host test run --mount type=bind,src=/wd,target=/wd,readonly --mount type=bind,source=/test,dst=/test,readonly busybox --mount type=bind,source=/wd,destination=/wd,readonly |
-    grep -q "^docker.orig --host test run --mount type=bind,src=${fixtures_dir},target=/wd,readonly --mount type=bind,source=/container-root/test,dst=/test,readonly --mount type=bind,source=${fixtures_dir}/testfile,dst=/test/testfile,readonly busybox --mount type=bind,source=/wd,destination=/wd,readonly$"
+    grep -q "^docker.orig --host test run --mount type=bind,src=${fixtures_dir},target=/wd,readonly --mount type=bind,source=${fixtures_dir},dst=/test,readonly --mount type=bind,source=${fixtures_dir}/testfile,dst=/test/testfile,readonly busybox --mount type=bind,source=/wd,destination=/wd,readonly$"
 
   echo "Same but for container run"
   "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
@@ -91,6 +94,13 @@ for docker_version in "${docker_versions[@]}"; do
   "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
     docker --host test whatever --volume /wd:/wd busybox --volume /wd:/wd |
     grep -q "^docker.orig --host test whatever --volume /wd:/wd busybox --volume /wd:/wd$"
+
+  echo "Passes through when the Docker is in a sidecar container"
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true \
+    --env DOCKER_HOST="unix:///nonexistent.sock" \
+    --volume "${fixtures_dir}:/wd" "${image_id}" \
+    docker run --volume /wd:/wd busybox |
+    grep -q "^docker.orig run --volume /wd:/wd busybox$"
 
   echo "Check if docker on docker is working"
   "${docker_args[@]}" "${image_id}" \
