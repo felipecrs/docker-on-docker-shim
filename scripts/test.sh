@@ -38,7 +38,6 @@ echo "Pulling docker images used in tests"
 docker pull -q busybox
 for docker_version in "${docker_versions[@]}"; do
   docker pull -q "docker:${docker_version}"
-  docker pull -q "docker:${docker_version}-dind"
 done
 
 for docker_version in "${docker_versions[@]}"; do
@@ -97,15 +96,11 @@ for docker_version in "${docker_versions[@]}"; do
     grep -q "^docker.orig --host test whatever --volume /wd:/wd busybox --volume /wd:/wd$"
 
   echo "Passes through when the Docker is in a sidecar container"
-  sidecar_dind_id="$(docker run --detach --privileged --env DOCKER_TLS_CERTDIR="" "docker:${docker_version}-dind")"
-  until docker exec "${sidecar_dind_id}" docker info >/dev/null 2>&1; do sleep 1; done
   "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true \
-    --link "${sidecar_dind_id}:dind" --env DOCKER_HOST="tcp://dind:2375" \
+    --env DOCKER_HOST="unix:///nonexistent.sock" \
     --volume "${fixtures_dir}:/wd" "${image_id}" \
     docker run --volume /wd:/wd busybox |
     grep -q "^docker.orig run --volume /wd:/wd busybox$"
-  docker rm --force "${sidecar_dind_id}" >/dev/null
-  unset sidecar_dind_id
 
   echo "Check if docker on docker is working"
   "${docker_args[@]}" "${image_id}" \
