@@ -102,7 +102,7 @@ function set_container_root_on_host() {
         --format '{{.Driver}}|{{.ResolvConfPath}}|{{.GraphDriver.Data.MergedDir}}' \
         "${container_id}" 2>/dev/null
     )"; then
-      sidecar_mode=true
+      likely_sidecar_docker=true
       return
     fi
 
@@ -187,13 +187,13 @@ function fix_volume_arg() {
   if [[ "${container_data_fetched}" == false ]]; then
     set_container_id
     set_container_root_on_host
-    if [[ "${sidecar_mode}" == false ]]; then
+    if [[ "${likely_sidecar_docker}" == false ]]; then
       set_parent_container_mounts
     fi
     container_data_fetched=true
   fi
 
-  if [[ "${sidecar_mode}" == true ]]; then
+  if [[ "${likely_sidecar_docker}" == true ]]; then
     return
   fi
 
@@ -384,7 +384,7 @@ unset next_arg_type skip_next_arg docker_command global_options_with_value_fetch
 
 # Finally it's time to transform the volume|mount arguments
 container_data_fetched=false
-sidecar_mode=false
+likely_sidecar_docker=false
 fix_next_arg=false
 fixed_args=()
 next_extra_args=()
