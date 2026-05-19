@@ -350,7 +350,7 @@ for arg in "${original_args[@]}"; do
       for option in "${docker_options_with_value[@]}"; do
         if [[ "${arg}" == "${option}" ]]; then
           skip_next_arg=true
-          continue
+          break
         fi
       done
     else
@@ -381,12 +381,7 @@ for arg in "${command_args[@]}"; do
     arg="${volume_arg}"
   elif [[ "${arg}" == "-v" || "${arg}" == "--volume" || "${arg}" == "--mount" ]]; then
     fix_next_arg=true
-  elif [[ "${arg}" == "-v="* || "${arg}" == "--volume="* ]]; then
-    option_name="${arg%%"="*}"
-    volume_arg="${arg#*"="}"
-    fix_volume_arg
-    arg="${option_name}=${volume_arg}"
-  elif [[ "${arg}" == "--mount="* ]]; then
+  elif [[ "${arg}" == "-v="* || "${arg}" == "--volume="* || "${arg}" == "--mount="* ]]; then
     option_name="${arg%%"="*}"
     volume_arg="${arg#*"="}"
     fix_volume_arg
