@@ -37,6 +37,7 @@ unset script_path script_dir
 echo "Pulling docker images used in tests"
 docker pull -q busybox
 for docker_version in "${docker_versions[@]}"; do
+  docker pull -q "docker:${docker_version}"
   docker pull -q "docker:${docker_version}-dind"
 done
 
