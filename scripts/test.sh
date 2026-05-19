@@ -36,7 +36,9 @@ unset script_path script_dir
 # this avoids messing with the test output during the tests itself
 echo "Pulling docker images used in tests"
 docker pull -q busybox
-docker pull -q "docker:${docker_version}-dind"
+for docker_version in "${docker_versions[@]}"; do
+  docker pull -q "docker:${docker_version}-dind"
+done
 
 for docker_version in "${docker_versions[@]}"; do
   echo "Testing with docker version: ${docker_version}"
