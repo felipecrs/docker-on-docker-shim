@@ -95,57 +95,40 @@ function set_container_id() {
 function set_container_root_on_host() {
   local result
 
-  if [[ -z "${mock_container_root_on_host}" ]]; then
-    local inspect_result
-    if ! inspect_result="$(
-      "${docker_path}" inspect \
-        --format '{{.Driver}}|{{.ResolvConfPath}}|{{.GraphDriver.Data.MergedDir}}{{range .Mounts}}{{if or (eq .Type "bind") (eq .Type "volume")}}{{printf "\n%s:%s" .Source .Destination}}{{end}}{{end}}' \
-        "${container_id}" 2>/dev/null
-    )"; then
-      likely_sidecar_docker=true
-      return
-    fi
-
-    local inspect_lines=()
-    readarray -t inspect_lines <<<"${inspect_result}"
-    unset inspect_result
-
-    local storage_driver="${inspect_lines[0]%%"|"*}"
-    local rest="${inspect_lines[0]#*"|"}"
-    local resolv_conf_path="${rest%%"|"*}"
-    local merged_dir="${rest#*"|"}"
-
-    if [[ "${storage_driver}" == "overlay2" ]]; then
-      result="${merged_dir}"
-    elif [[ "${storage_driver}" == "overlayfs" ]]; then
-      local docker_data_dir="${resolv_conf_path%"/containers/"*}"
-      result="${docker_data_dir}/rootfs/overlayfs/${container_id}"
-    else
-      error "Unsupported storage driver: ${storage_driver}"
-    fi
-
-    if [[ "${#inspect_lines[@]}" -gt 1 ]]; then
-      parent_container_mounts=("${inspect_lines[@]:1}")
-    else
-      parent_container_mounts=()
-    fi
-    unset inspect_lines
-  else
-    result="${mock_container_root_on_host}"
-
-    local inspect_output
-    inspect_output=$(
-      "${docker_path}" inspect \
-        --format '{{range .Mounts}}{{if or (eq .Type "bind") (eq .Type "volume")}}{{printf "%s:%s\n" .Source .Destination}}{{end}}{{end}}' \
-        "${container_id}"
-    )
-    if [[ -n "${inspect_output}" ]]; then
-      readarray -t parent_container_mounts <<<"${inspect_output}"
-    else
-      parent_container_mounts=()
-    fi
-    unset inspect_output
+  local inspect_result
+  if ! inspect_result="$(
+    "${docker_path}" inspect \
+      --format '{{.Driver}}|{{.ResolvConfPath}}|{{.GraphDriver.Data.MergedDir}}{{range .Mounts}}{{if or (eq .Type "bind") (eq .Type "volume")}}{{printf "\n%s:%s" .Source .Destination}}{{end}}{{end}}' \
+      "${container_id}" 2>/dev/null
+  )"; then
+    likely_sidecar_docker=true
+    return
   fi
+
+  local inspect_lines=()
+  readarray -t inspect_lines <<<"${inspect_result}"
+  unset inspect_result
+
+  local storage_driver="${inspect_lines[0]%%"|"*}"
+  local rest="${inspect_lines[0]#*"|"}"
+  local resolv_conf_path="${rest%%"|"*}"
+  local merged_dir="${rest#*"|"}"
+
+  if [[ "${storage_driver}" == "overlay2" ]]; then
+    result="${merged_dir}"
+  elif [[ "${storage_driver}" == "overlayfs" ]]; then
+    local docker_data_dir="${resolv_conf_path%"/containers/"*}"
+    result="${docker_data_dir}/rootfs/overlayfs/${container_id}"
+  else
+    error "Unsupported storage driver: ${storage_driver}"
+  fi
+
+  if [[ "${#inspect_lines[@]}" -gt 1 ]]; then
+    parent_container_mounts=("${inspect_lines[@]:1}")
+  else
+    parent_container_mounts=()
+  fi
+  unset inspect_lines
 
   # Sanity check
   if [[ "${result}" =~ ^(/[^/]+)+$ ]]; then
@@ -254,7 +237,6 @@ script_path="$(realpath "$0")"
 readonly script_path
 
 # Parse supported environment variables
-readonly mock_container_root_on_host="${DOND_SHIM_MOCK_CONTAINER_ROOT_ON_HOST:-}"
 readonly print_command="${DOND_SHIM_PRINT_COMMAND:-false}"
 
 if [[ -n "${DOND_SHIM_DOCKER_PATH:-}" ]]; then
