@@ -98,7 +98,7 @@ function set_container_root_on_host() {
   local inspect_result
   if ! inspect_result="$(
     "${docker_path}" inspect \
-      --format '{{printf "%s\n%s\n%s" .Driver .ResolvConfPath .GraphDriver.Data.MergedDir}}{{range .Mounts}}{{if or (eq .Type "bind") (eq .Type "volume")}}{{printf "\n%s:%s" .Source .Destination}}{{end}}{{end}}' \
+      --format '{{printf "%s\n%s\n" .Driver .ResolvConfPath}}{{if eq .Driver "overlay2"}}{{.GraphDriver.Data.MergedDir}}{{end}}{{range .Mounts}}{{if or (eq .Type "bind") (eq .Type "volume")}}{{printf "\n%s:%s" .Source .Destination}}{{end}}{{end}}' \
       "${container_id}" 2>/dev/null
   )"; then
     likely_sidecar_docker=true
@@ -111,7 +111,8 @@ function set_container_root_on_host() {
 
   local storage_driver="${inspect_lines[0]}"
   local resolv_conf_path="${inspect_lines[1]}"
-  local merged_dir="${inspect_lines[2]}"
+  # Trailing empty lines are lost when there is neither a merged dir nor a mount
+  local merged_dir="${inspect_lines[2]:-}"
 
   if [[ "${storage_driver}" == "overlay2" ]]; then
     result="${merged_dir}"
