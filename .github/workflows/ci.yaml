@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Set host Docker storage driver
+      - name: Set host Docker storage driver and minimum API version
         run: |
           set -euxo pipefail
           if [ -f /etc/docker/daemon.json ]; then
@@ -41,6 +41,8 @@ jobs:
           else
             daemon_json='{}'
           fi
+          # Otherwise the daemon refuses clients older than 19.03
+          daemon_json=$(echo "${daemon_json}" | jq '.["min-api-version"]="1.24"')
           if [ '${{ matrix.storage-driver }}' == "overlay2" ]; then
             echo "${daemon_json}" | jq '.features["containerd-snapshotter"]=false' | sudo tee /etc/docker/daemon.json
           elif [ '${{ matrix.storage-driver }}' == "overlayfs" ]; then
