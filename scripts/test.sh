@@ -80,6 +80,16 @@ for docker_version in "${docker_versions[@]}"; do
     docker --host test container run --volume /wd:/wd busybox --volume /wd:/wd |
     grep -q "^docker.orig --host test container run --volume ${fixtures_dir}:/wd busybox --volume /wd:/wd$"
 
+  echo "Same but with an option whose value type is not only lowercase letters (uint16)"
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
+    docker --host test run --blkio-weight 100 --volume /wd:/wd busybox --volume /wd:/wd |
+    grep -q "^docker.orig --host test run --blkio-weight 100 --volume ${fixtures_dir}:/wd busybox --volume /wd:/wd$"
+
+  echo "Same but with an option which is hidden from the --help output"
+  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
+    docker --host test run --net host --volume /wd:/wd busybox --volume /wd:/wd |
+    grep -q "^docker.orig --host test run --net host --volume ${fixtures_dir}:/wd busybox --volume /wd:/wd$"
+
   echo "Same but for create"
   "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
     docker --host test create --volume /wd:/wd busybox --volume /wd:/wd |

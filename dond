@@ -50,7 +50,7 @@ function set_docker_options_with_value() {
   for line in "${help_lines[@]}"; do
     # second group is the short option (optional)
     # third group is the long option
-    if [[ "${line}" =~ ^[[:space:]]+((-[a-zA-Z]),[[:space:]])?(--[a-z0-9-]+)[[:space:]][a-z]+[[:space:]]+.*$ ]]; then
+    if [[ "${line}" =~ ^[[:space:]]+((-[a-zA-Z]),[[:space:]])?(--[a-z0-9-]+)[[:space:]][^[:space:][]+[[:space:]]{2,}.*$ ]]; then
       if [[ -n "${BASH_REMATCH[2]}" ]]; then
         docker_options_with_value+=("${BASH_REMATCH[2]}")
       fi
@@ -345,6 +345,11 @@ for arg in "${original_args[@]}"; do
       # Only fetch docker command options when needed and only once
       if [[ "${command_options_with_value_fetched}" == false ]]; then
         set_docker_options_with_value "${docker_command[@]}"
+        # These are hidden from the --help output
+        docker_options_with_value+=(
+          --net --net-alias --dns-opt --kernel-memory
+          --cpu-count --cpu-percent --io-maxbandwidth --io-maxiops
+        )
         command_options_with_value_fetched=true
       fi
 
