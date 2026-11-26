@@ -94,9 +94,9 @@ func rewriteCreate(body []byte, mapPath func(string) (string, []nestedMount, err
 	if json.Unmarshal(host["Binds"], &binds) == nil && binds != nil {
 		var out []string
 		for _, bind := range binds {
-			source, rest, _ := strings.Cut(bind, ":")
+			source, rest := splitBind(bind)
 			destination, options, hasOptions := strings.Cut(rest, ":")
-			if !strings.HasPrefix(source, "/") || destination == "" {
+			if !isPath(source) || destination == "" {
 				out = append(out, bind)
 				continue
 			}
@@ -131,7 +131,7 @@ func rewriteCreate(body []byte, mapPath func(string) (string, []nestedMount, err
 			_ = json.Unmarshal(mount["Type"], &kind)
 			_ = json.Unmarshal(mount["Source"], &source)
 			_ = json.Unmarshal(mount["Target"], &target)
-			if kind != "bind" || !strings.HasPrefix(source, "/") {
+			if kind != "bind" || !isPath(source) {
 				continue
 			}
 			mapped, nested, err := mapPath(source)

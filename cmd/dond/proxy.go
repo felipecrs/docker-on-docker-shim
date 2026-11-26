@@ -13,7 +13,9 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -34,8 +36,11 @@ type proxy struct {
 	network, address string // upstream
 	socket           string // the proxy's own socket
 	mountinfo        string
-	reverse          *httputil.ReverseProxy
-	client           *http.Client
+	// wslRoot, when set, gives the root of the drives in WSL, such as /mnt/, and the proxy maps the
+	// paths of Windows instead of the paths of this container.
+	wslRoot func() string
+	reverse *httputil.ReverseProxy
+	client  *http.Client
 
 	retry bool // inspect again after a failed inspection, for a proxy that lives long
 
@@ -50,11 +55,18 @@ func newProxy(upstream, socket string) *proxy {
 	p.network, p.address = dialAddress(upstream)
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, p.network, p.address)
+			return dialUpstream(ctx, p.network, p.address)
 		},
 		DisableCompression: true,
+		// An idle connection through wsl.exe keeps a process, and WSL, running.
+		IdleConnTimeout: 90 * time.Second,
 	}
 	p.client = &http.Client{Transport: transport}
+	if p.network == "wsl" {
+		p.wslRoot = wslRoot()
+		// Pooled connections through wsl.exe would never give way to the listener under steady use.
+		onListenerFound(transport.CloseIdleConnections)
+	}
 	p.reverse = &httputil.ReverseProxy{
 		Rewrite:       func(r *httputil.ProxyRequest) { r.Out.URL.Scheme, r.Out.URL.Host = "http", "docker" },
 		FlushInterval: -1,
@@ -109,8 +121,14 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.reverse.ServeHTTP(w, r)
 }
 
-// mapPath maps a source path in this container to the host.
+// mapPath maps a source path in this container, or of Windows, to the host.
 func (p *proxy) mapPath(source string) (string, []nestedMount, error) {
+	if p.wslRoot != nil {
+		return wslPath(source, p.wslRoot), nil, nil
+	}
+	if !strings.HasPrefix(source, "/") {
+		return source, nil, nil
+	}
 	p.mu.Lock()
 	if !p.inspected || (p.self == nil && !p.chained && p.retry) {
 		p.inspected = true

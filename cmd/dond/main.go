@@ -5,21 +5,20 @@ package main
 import (
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
-	"syscall"
-	"unsafe"
 )
 
 const (
 	// proxyEnv tells a wrapper started by another wrapper that the command is proxied already.
 	proxyEnv      = "DOND_SHIM_PROXY"
 	dockerPathEnv = "DOND_SHIM_DOCKER_PATH"
+	// renameCommand is the first argument of the shim in the helper container of the daemon.
+	renameCommand = "dond-shim-rename"
 )
 
 // version is set at build time.
@@ -46,6 +45,9 @@ func run() (int, error) {
 		return rename(os.Args[2], os.Args[3])
 	}
 	name, args := filepath.Base(os.Args[0]), os.Args[1:]
+	if runtime.GOOS == "windows" && strings.EqualFold(filepath.Ext(name), ".exe") {
+		name = name[:len(name)-4]
+	}
 	if name == "dond" {
 		if len(args) > 0 && args[0] == "wrap" {
 			if len(args) < 2 {
@@ -74,23 +76,14 @@ func run() (int, error) {
 		return execCommand(path, name, args)
 	}
 
-	dir, err := os.MkdirTemp("", "dond-shim-")
+	listener, proxyHost, socket, err := listenPrivate()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "WARNING(dond-shim): running without the proxy:", err)
-		return execCommand(path, name, args)
-	}
-	defer os.RemoveAll(dir)
-	socket := filepath.Join(dir, "docker.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "WARNING(dond-shim): running without the proxy:", err)
-		_ = os.RemoveAll(dir)
 		return execCommand(path, name, args)
 	}
 	defer listener.Close()
 	go (&http.Server{Handler: newProxy(upstream, socket), ErrorLog: logger()}).Serve(listener)
 
-	proxyHost := "unix://" + socket
 	for _, h := range hostArgs {
 		args[h.index] = h.prefix + proxyHost
 	}
@@ -98,39 +91,13 @@ func run() (int, error) {
 	cmd.Args[0] = name
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	cmd.Env = append(os.Environ(), "DOCKER_HOST="+proxyHost, proxyEnv+"="+proxyHost)
-
-	signals := make(chan os.Signal, 4)
-	signal.Notify(signals, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT)
-	if err := cmd.Start(); err != nil {
-		return 127, err
-	}
-	go func() {
-		for s := range signals {
-			// The terminal sent it to the whole foreground process group, the child included.
-			if s != syscall.SIGTERM && inForeground() {
-				continue
-			}
-			_ = cmd.Process.Signal(s)
-		}
-	}()
-	// The streams are files, so Wait fails only for the exit status, read below.
-	_ = cmd.Wait()
-	status := cmd.ProcessState.Sys().(syscall.WaitStatus)
-	if status.Signaled() {
-		return 128 + int(status.Signal()), nil
-	}
-	return status.ExitStatus(), nil
-}
-
-// execCommand replaces this process with the command, without a proxy.
-func execCommand(path, name string, args []string) (int, error) {
-	return 127, syscall.Exec(path, append([]string{name}, args...), os.Environ())
+	return runCommand(cmd)
 }
 
 // findCommand returns the real command for name: DOND_SHIM_DOCKER_PATH for docker, else
 // <name>.orig, else the next <name> on PATH that is not this binary.
 func findCommand(name string) (string, error) {
-	self, _ := os.Stat("/proc/self/exe")
+	self, _ := os.Stat(selfPath())
 	isSelf := func(path string) bool {
 		info, err := os.Stat(path)
 		return err == nil && os.SameFile(info, self)
@@ -145,30 +112,17 @@ func findCommand(name string) (string, error) {
 		}
 		return path, nil
 	}
-	if strings.Contains(name, "/") {
+	if strings.ContainsAny(name, "/"+string(filepath.Separator)) {
 		return name, nil
 	}
 	if path, err := exec.LookPath(name + ".orig"); err == nil && !isSelf(path) {
 		return path, nil
 	}
 	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
-		path := filepath.Join(dir, name)
-		info, err := os.Stat(path)
-		if filepath.IsAbs(dir) && err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0 && !os.SameFile(info, self) {
+		// LookPath checks that the file is executable, and adds the extensions of PATHEXT on Windows.
+		if path, err := exec.LookPath(filepath.Join(dir, name)); filepath.IsAbs(dir) && err == nil && !isSelf(path) {
 			return path, nil
 		}
 	}
 	return "", fmt.Errorf("could not find the real %s: neither %s.orig nor another %s is on PATH", name, name, name)
-}
-
-// inForeground tells whether this process group is the foreground group of its terminal.
-func inForeground() bool {
-	tty, err := syscall.Open("/dev/tty", syscall.O_RDONLY|syscall.O_NOCTTY|syscall.O_CLOEXEC, 0)
-	if err != nil {
-		return false
-	}
-	defer syscall.Close(tty)
-	var group int32
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(tty), syscall.TIOCGPGRP, uintptr(unsafe.Pointer(&group)))
-	return errno == 0 && int(group) == syscall.Getpgrp()
 }

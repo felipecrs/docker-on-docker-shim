@@ -38,6 +38,7 @@ Although this shim can be used in many cases, some of the most common ones are:
 
 - Tested with all versions of docker from `18.03` to `latest`.
 - One static binary for Linux (`amd64` and `arm64`), with no dependencies.
+- On Windows, the same binary talks to Docker in WSL and maps the paths of Windows, as `dond daemon` or in front of the native docker cli. See [Windows with Docker in WSL](#windows-with-docker-in-wsl).
 - Rename the docker cli to `docker.orig`, place this shim where the docker cli was, and continue calling `docker` as usual.
 - Or install this shim as the `dond` command and call `dond` instead of `docker`.
 - Or run any other command behind it with `dond wrap <command>`, or with a symlink named after that command.
@@ -193,10 +194,94 @@ s6 stops the daemon with `SIGTERM`, which puts the symlink back. Clients that st
 - The daemon refuses to start when the directory of the socket is a bind or volume mount, such as `-v /run:/run`, because it would rename or create files in a directory of the host.
 - Tested in CI with AppArmor, `userns-remap` (with `--userns=host` for the containers that use the socket) and rootless Docker. Not tested with SELinux.
 
+## Windows with Docker in WSL
+
+On Windows, the shim talks to a Docker daemon inside WSL, with no Docker Desktop, and maps the paths of Windows in bind mounts to WSL. Which to pick:
+
+- [docker-wsl-shim](https://github.com/felipecrs/docker-wsl-shim), when there is no native docker cli on Windows. It is one `docker.exe` that runs the docker cli of WSL, with nothing else to install.
+- This shim, when the native docker cli for Windows is installed.
+- `dond daemon`, for programs that talk to the Docker API themselves, such as Testcontainers and IDEs. It works next to either of the two above.
+
+What it does on Windows:
+
+- It maps the paths of Windows in bind mounts (`-v`, `--mount`, Compose `volumes`, and the API) to WSL: `C:\dir` and `C:/dir` become `/mnt/c/dir`, and `\\wsl.localhost\<distro>\dir` becomes `/dir`. The root of the drives is read from the `[automount]` section of `/etc/wsl.conf` in the distribution, `/mnt/` by default. Paths of WSL, such as `/home/me`, are left alone.
+- Everything else the cli does with files of Windows works by itself, because the cli reads them on Windows: build contexts, `-f`, `--env-file`, `--cidfile`, `docker cp`, Compose files and relative paths.
+
+### Installation on Windows
+
+1. Install Docker in the default WSL distribution, with the docker cli, and add your user there to the `docker` group.
+2. Install the native docker cli for Windows, and Compose and Buildx if you use them. For example with [Scoop](https://scoop.sh), whose `docker-compose` and `docker-buildx` put the plugins in `%USERPROFILE%\.docker\cli-plugins`:
+
+   ```powershell
+   scoop install docker docker-compose docker-buildx
+   ```
+
+   Scoop's `docker` also brings `dockerd.exe`, which runs Windows containers only and is not needed. Other sources: the zips at <https://download.docker.com/win/static/stable/>, the Chocolatey packages `docker-cli` and `docker-compose`, and the Windows binaries in the releases of [docker/compose](https://github.com/docker/compose/releases) and [docker/buildx](https://github.com/docker/buildx/releases), which go to `%USERPROFILE%\.docker\cli-plugins` as `docker-compose.exe` and `docker-buildx.exe`.
+3. Download `dond-windows-amd64.exe` (or `arm64`) from the [releases](https://github.com/felipecrs/docker-on-docker-shim/releases), and save it as `dond.exe` in a directory on `PATH`. Under another name, it looks for a command of that name.
+
+Then use it in one of the two ways below.
+
+### `dond daemon` (recommended)
+
+`dond daemon` serves the proxy at `\\.\pipe\docker_engine`, the default pipe of the docker cli, until Ctrl+C or Ctrl+Break. Any client of Windows then reaches Docker in WSL with the paths mapped, and no wrapper: the docker cli as it is, Compose, Testcontainers, IDEs.
+
+- It refuses to start when the pipe exists, for example when Docker Desktop runs, and only the current user may open it.
+- Run it in a terminal, or start it at logon, for example with a scheduled task.
+- When the listener (below) goes away, it goes on through `wsl.exe` after a second, and it looks for the listener again for a new connection, at most every 30 seconds.
+- Through `wsl.exe` it keeps two `wsl.exe` waiting, which keep WSL running as long as it runs. With the listener it keeps none, so WSL can stop when idle, and the next request starts it again.
+
+### The wrapper, with no background process
+
+Save the shim also as `docker.exe` in a directory that comes before the real `docker.exe` on `PATH`, and keep calling `docker`. Each command then runs behind its own proxy, on a named pipe with a random name that only the current user may open, with `DOCKER_HOST=npipe:////./pipe/dond-shim-…`. The shim runs the real cli: `DOND_SHIM_DOCKER_PATH`, else `docker.orig.exe` on `PATH`, else the next `docker.exe` on `PATH`. Or call `dond` instead of `docker`.
+
+It needs the native docker cli. With docker-wsl-shim as the next `docker.exe` it still works, but only adds a proxy and two `wsl.exe` that nothing uses.
+
+### How it reaches WSL
+
+With nothing set up in WSL, each connection runs `wsl.exe -e docker system dial-stdio`. `wsl.exe` takes about 100 ms to start, so the shim starts two of them ahead, while the cli starts.
+
+A listener in WSL on the vsock port 2375 is faster: the shim looks for it at start, in about 3 ms, and then connects through a Hyper-V socket in about 1 ms, with no `wsl.exe`. To set it up, in the distribution that runs Docker:
+
+```bash
+sudo apt-get install -y socat
+sudo tee /etc/systemd/system/dond-vsock.service >/dev/null <<'EOF'
+[Unit]
+Description=Docker API on vsock port 2375, for dond-shim on Windows
+Requires=docker.socket
+After=docker.socket
+
+[Service]
+# -t: an attach whose input ended still receives the output of the container.
+ExecStart=/usr/bin/socat -t 86400 VSOCK-LISTEN:2375,fork UNIX-CONNECT:/run/docker.sock
+DynamicUser=yes
+SupplementaryGroups=docker
+# socat ends with 143 on SIGTERM.
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl enable --now dond-vsock.service
+```
+
+`systemd-socket-proxyd` does not work for this: an attach without input, such as `docker run` without `-i`, loses the output.
+
+The listener gives the Docker socket, which is root in WSL, to whoever can open a Hyper-V socket to the VM of WSL: processes of your Windows user. Users in WSL outside the `docker` group cannot reach it, as vsock in WSL has no loopback. Whether other Windows users or administrators can was not tested.
+
+### Limits on Windows
+
+- Only the default endpoint, `npipe:////./pipe/docker_engine` with no `-H`, `DOCKER_HOST` or context other than `default`, is taken for the daemon in WSL. Another endpoint runs without the proxy.
+- `\\wsl.localhost\<distro>\…` is taken for the distribution of the daemon, whatever its name.
+- Paths of network shares, and `device=C:\…` in the options of a volume, are left as they are.
+- `docker buildx create` with the `docker-container` driver stores the endpoint of the command, the pipe of one wrapper, which is gone the next time. Create such builders with the plain docker cli while `dond daemon` runs. The same happens on Linux with the wrapper's socket ([#34](https://github.com/felipecrs/docker-on-docker-shim/issues/34)).
+- The wrapper starts its two `wsl.exe` for every command, also for one that never connects, such as `docker --version`. When WSL is stopped, that starts it.
+- A shell in `docker run -it` can drop what is typed in the same few milliseconds as its first resize, which can come right after the prompt with `wsl.exe`.
+
 ## Environment variables
 
 - `DOND_SHIM_DOCKER_PATH`: the docker cli to run, instead of `docker.orig` or the next `docker` on `PATH`.
 - `DOND_SHIM_SKIP=true`: run the command without the proxy.
+- `DOND_SHIM_WSL_DISTRO`: on Windows, the WSL distribution of the daemon, instead of the default one.
 - `DOND_SHIM_DEBUG=true`: print the shim version, the endpoint it forwards to, and each mapped mount to stderr.
 - `DOND_SHIM_PROXY`: set by the shim for the command it runs, so that a shim started by that command does not start a second proxy. Do not set it yourself.
 
@@ -205,7 +290,7 @@ s6 stops the daemon with `SIGTERM`, which puts the symlink back. Clients that st
 ## Limits
 
 - A client that ignores `DOCKER_HOST` and opens `/var/run/docker.sock` by itself is not covered by the wrapper. The [daemon mode](#daemon-mode) covers it.
-- These run without the proxy, as if the shim were not installed: the `--context` flag, TLS (`--tls*` flags, `DOCKER_TLS_VERIFY`, `DOCKER_TLS`, or a context with TLS material), and endpoints other than `unix://` and `tcp://`, such as `ssh://`.
+- These run without the proxy, as if the shim were not installed: the `--context` flag with a context other than `default`, TLS (`--tls*` flags, `DOCKER_TLS_VERIFY`, `DOCKER_TLS`, or a context with TLS material), and endpoints other than `unix://` and `tcp://`, such as `ssh://`.
 - When the daemon does not know the container the shim runs in, for example a daemon in a sidecar container, the shim changes nothing.
 - The supported storage drivers are `overlay2` and `overlayfs` (the containerd image store). With another one, mounting a path that is not under one of the container's mounts fails with an error that names the driver.
 - As a wrapper, one extra process lives for the duration of each command.

@@ -7,10 +7,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
-
-const defaultHost = "unix:///var/run/docker.sock"
 
 // globalOptionsWithValue is the only knowledge of the docker command line the shim keeps.
 var globalOptionsWithValue = map[string]bool{
@@ -27,7 +26,7 @@ type hostArg struct {
 // resolveUpstream returns the endpoint the command would use, in the docker CLI's own order, and
 // where -H values are. It returns "" when the command must run without the proxy.
 func resolveUpstream(isDocker bool, args []string) (string, []hostArg) {
-	host, configDir := "", os.Getenv("DOCKER_CONFIG")
+	host, configDir, defaultContext := "", os.Getenv("DOCKER_CONFIG"), false
 	var hostArgs []hostArg
 	for i := 0; isDocker && i < len(args); i++ {
 		arg := args[i]
@@ -54,7 +53,11 @@ func resolveUpstream(isDocker bool, args []string) (string, []hostArg) {
 		}
 		switch name {
 		case "-c", "--context":
-			return "", nil
+			// The default context is DOCKER_HOST, or else the default endpoint, so the proxy can serve it.
+			if value != "default" {
+				return "", nil
+			}
+			defaultContext = true
 		case "-H", "--host":
 			host = value
 			hostArgs = append(hostArgs, hostArg{i, prefix})
@@ -67,6 +70,9 @@ func resolveUpstream(isDocker bool, args []string) (string, []hostArg) {
 	}
 	if host == "" {
 		host = os.Getenv("DOCKER_HOST")
+	}
+	if host == "" && defaultContext {
+		host = defaultHost
 	}
 	if host == "" {
 		host = contextHost(configDir)
@@ -81,7 +87,8 @@ func resolveUpstream(isDocker bool, args []string) (string, []hostArg) {
 // support.
 func contextHost(configDir string) string {
 	if configDir == "" {
-		configDir = filepath.Join(os.Getenv("HOME"), ".docker")
+		home, _ := os.UserHomeDir()
+		configDir = filepath.Join(home, ".docker")
 	}
 	name := os.Getenv("DOCKER_CONTEXT")
 	if name == "" {
@@ -111,6 +118,14 @@ func contextHost(configDir string) string {
 
 // dialAddress returns how to reach host, or "" for a host the proxy does not support.
 func dialAddress(host string) (network, address string) {
+	if runtime.GOOS == "windows" {
+		// The default endpoint is taken for the daemon in WSL. Another one is left alone, because
+		// there is no telling whether it sees the drives of Windows.
+		if host == defaultHost {
+			return "wsl", ""
+		}
+		return "", ""
+	}
 	if path, ok := strings.CutPrefix(host, "unix://"); ok && path != "" {
 		return "unix", path
 	}

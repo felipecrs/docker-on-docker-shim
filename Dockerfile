@@ -7,7 +7,7 @@ ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION="dev"
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
 COPY cmd ./cmd
 RUN CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
   go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /dond ./cmd/dond

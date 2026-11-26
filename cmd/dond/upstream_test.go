@@ -1,3 +1,5 @@
+//go:build !windows
+
 package main
 
 import (
@@ -47,6 +49,8 @@ func TestResolveUpstream(t *testing.T) {
 		{name: "only for docker", notDock: true, args: "-H unix:///a", want: defaultHost},
 		{name: "--context", args: "--context remote ps", want: ""},
 		{name: "-c", args: "-c=remote ps", want: ""},
+		{name: "--context default", args: "--context default ps", env: map[string]string{"DOCKER_CONFIG": other}, want: defaultHost},
+		{name: "-c=default with DOCKER_HOST", args: "-c=default ps", env: map[string]string{"DOCKER_HOST": "tcp://h:1"}, want: "tcp://h:1"},
 		{name: "--tlsverify", args: "--tlsverify -H tcp://h:2376 ps", want: ""},
 		{name: "--tlscacert", args: "--tlscacert ca.pem ps", want: ""},
 		{name: "DOCKER_TLS_VERIFY", args: "ps", env: map[string]string{"DOCKER_HOST": "tcp://h:2376", "DOCKER_TLS_VERIFY": "1"}, want: ""},
