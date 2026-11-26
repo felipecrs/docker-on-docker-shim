@@ -18,47 +18,47 @@ func TestRewriteCreate(t *testing.T) {
 	}{
 		{
 			name:      "volume",
-			container: `{"Mounts": [{"Type": "bind", "Source": "/fixtures", "Destination": "/wd"}]}`,
+			container: `{"Mounts": [{"Type": "bind", "Source": "/fixtures", "Destination": "/wd", "RW": true}]}`,
 			request:   `{"Binds": ["/wd:/wd"]}`,
 			want:      `{"Binds": ["/fixtures:/wd"]}`,
 		},
 		{
 			name:      "volume read only",
-			container: `{"Mounts": [{"Type": "bind", "Source": "/fixtures", "Destination": "/wd"}]}`,
+			container: `{"Mounts": [{"Type": "bind", "Source": "/fixtures", "Destination": "/wd", "RW": true}]}`,
 			request:   `{"Binds": ["/wd:/wd:ro"]}`,
 			want:      `{"Binds": ["/fixtures:/wd:ro"]}`,
 		},
 		{
 			name:      "volume and mount",
-			container: `{"Mounts": [{"Type": "bind", "Source": "/fixtures", "Destination": "/wd"}]}`,
+			container: `{"Mounts": [{"Type": "bind", "Source": "/fixtures", "Destination": "/wd", "RW": true}]}`,
 			request:   `{"Binds": ["/wd:/wd:ro"], "Mounts": [{"Type": "bind", "Source": "/wd", "Target": "/wd2", "ReadOnly": true}]}`,
 			want:      `{"Binds": ["/fixtures:/wd:ro"], "Mounts": [{"Type": "bind", "Source": "/fixtures", "Target": "/wd2", "ReadOnly": true}]}`,
 		},
 		{
 			name: "nested volume keeps read only",
 			container: `{"Mounts": [
-				{"Type": "bind", "Source": "/fixtures", "Destination": "/wd"},
-				{"Type": "bind", "Source": "/fixtures", "Destination": "/test"},
-				{"Type": "bind", "Source": "/fixtures/testfile", "Destination": "/test/testfile"}]}`,
+				{"Type": "bind", "Source": "/fixtures", "Destination": "/wd", "RW": true},
+				{"Type": "bind", "Source": "/fixtures", "Destination": "/test", "RW": true},
+				{"Type": "bind", "Source": "/fixtures/testfile", "Destination": "/test/testfile", "RW": true}]}`,
 			request: `{"Binds": ["/wd:/wd:ro", "/test:/test:ro"]}`,
 			want:    `{"Binds": ["/fixtures:/wd:ro", "/fixtures:/test:ro", "/fixtures/testfile:/test/testfile:ro"]}`,
 		},
 		{
 			name: "nested tmpfs is not added",
 			container: `{"Mounts": [
-				{"Type": "bind", "Source": "/fixtures", "Destination": "/wd"},
-				{"Type": "bind", "Source": "/fixtures", "Destination": "/test"},
-				{"Type": "bind", "Source": "/fixtures/testfile", "Destination": "/test/testfile"},
-				{"Type": "tmpfs", "Source": "", "Destination": "/test/tmpfsdir"}]}`,
+				{"Type": "bind", "Source": "/fixtures", "Destination": "/wd", "RW": true},
+				{"Type": "bind", "Source": "/fixtures", "Destination": "/test", "RW": true},
+				{"Type": "bind", "Source": "/fixtures/testfile", "Destination": "/test/testfile", "RW": true},
+				{"Type": "tmpfs", "Source": "", "Destination": "/test/tmpfsdir", "RW": true}]}`,
 			request: `{"Binds": ["/wd:/wd:ro", "/test:/test:ro"]}`,
 			want:    `{"Binds": ["/fixtures:/wd:ro", "/fixtures:/test:ro", "/fixtures/testfile:/test/testfile:ro"]}`,
 		},
 		{
 			name: "nested mount is a copy of the original",
 			container: `{"Mounts": [
-				{"Type": "bind", "Source": "/fixtures", "Destination": "/wd"},
-				{"Type": "bind", "Source": "/fixtures", "Destination": "/test"},
-				{"Type": "bind", "Source": "/fixtures/testfile", "Destination": "/test/testfile"}]}`,
+				{"Type": "bind", "Source": "/fixtures", "Destination": "/wd", "RW": true},
+				{"Type": "bind", "Source": "/fixtures", "Destination": "/test", "RW": true},
+				{"Type": "bind", "Source": "/fixtures/testfile", "Destination": "/test/testfile", "RW": true}]}`,
 			request: `{"Mounts": [
 				{"Type": "bind", "Source": "/wd", "Target": "/wd", "ReadOnly": true},
 				{"Type": "bind", "Source": "/test", "Target": "/test", "ReadOnly": true, "BindOptions": {"Propagation": "rprivate"}}]}`,
@@ -70,25 +70,67 @@ func TestRewriteCreate(t *testing.T) {
 		{
 			name: "nested volume when the source is from the container root",
 			container: `{"Driver": "overlay2", "GraphDriver": {"Data": {"MergedDir": "/var/lib/docker/overlay2/abc/merged"}}, "Mounts": [
-				{"Type": "bind", "Source": "/fixtures/testfile", "Destination": "/test/testfile"},
-				{"Type": "volume", "Source": "/var/lib/docker/volumes/v/_data", "Destination": "/test/v"}]}`,
+				{"Type": "bind", "Source": "/fixtures/testfile", "Destination": "/test/testfile", "RW": true},
+				{"Type": "volume", "Source": "/var/lib/docker/volumes/v/_data", "Destination": "/test/v", "RW": true}]}`,
 			request: `{"Binds": ["/test:/wd"]}`,
 			want:    `{"Binds": ["/var/lib/docker/overlay2/abc/merged/test:/wd", "/fixtures/testfile:/wd/testfile", "/var/lib/docker/volumes/v/_data:/wd/v"]}`,
 		},
 		{
 			name:      "file in a mount",
-			container: `{"Mounts": [{"Type": "bind", "Source": "/fixtures", "Destination": "/wd"}]}`,
+			container: `{"Mounts": [{"Type": "bind", "Source": "/fixtures", "Destination": "/wd", "RW": true}]}`,
 			request:   `{"Binds": ["/wd/testfile:/wd/testfile"]}`,
 			want:      `{"Binds": ["/fixtures/testfile:/wd/testfile"]}`,
 		},
 		{
 			name: "longest destination wins",
 			container: `{"Driver": "overlay2", "GraphDriver": {"Data": {"MergedDir": "/m"}}, "Mounts": [
-				{"Type": "bind", "Source": "/a", "Destination": "/wd"},
-				{"Type": "volume", "Source": "/b", "Destination": "/wd/sub"},
-				{"Type": "bind", "Source": "/c", "Destination": "/w"}]}`,
+				{"Type": "bind", "Source": "/a", "Destination": "/wd", "RW": true},
+				{"Type": "volume", "Source": "/b", "Destination": "/wd/sub", "RW": true},
+				{"Type": "bind", "Source": "/c", "Destination": "/w", "RW": true}]}`,
 			request: `{"Binds": ["/wd/sub/x:/x", "/wdx:/y"], "Mounts": [{"Type": "bind", "Source": "/wd/s", "Target": "/z"}]}`,
 			want:    `{"Binds": ["/b/x:/x", "/m/wdx:/y"], "Mounts": [{"Type": "bind", "Source": "/a/s", "Target": "/z"}]}`,
+		},
+		{
+			name:      "read-only mount stays read-only",
+			container: `{"Mounts": [{"Type": "bind", "Source": "/fixtures", "Destination": "/ro", "RW": false}]}`,
+			request: `{"Binds": ["/ro:/a", "/ro/x:/b:z", "/ro:/c:ro", "/ro:/d:rw,rslave"], "Mounts": [
+				{"Type": "bind", "Source": "/ro/x", "Target": "/e"},
+				{"Type": "bind", "Source": "/ro", "Target": "/f", "ReadOnly": true},
+				{"Type": "bind", "Source": "/ro", "Target": "/g", "ReadOnly": false}]}`,
+			want: `{"Binds": ["/fixtures:/a:ro", "/fixtures/x:/b:z,ro", "/fixtures:/c:ro", "/fixtures:/d:rslave,ro"], "Mounts": [
+				{"Type": "bind", "Source": "/fixtures/x", "Target": "/e", "ReadOnly": true},
+				{"Type": "bind", "Source": "/fixtures", "Target": "/f", "ReadOnly": true},
+				{"Type": "bind", "Source": "/fixtures", "Target": "/g", "ReadOnly": true}]}`,
+		},
+		{
+			name: "longest destination decides read-only",
+			container: `{"Mounts": [
+				{"Type": "bind", "Source": "/a", "Destination": "/ro", "RW": false},
+				{"Type": "volume", "Source": "/b", "Destination": "/ro/rw", "RW": true},
+				{"Type": "bind", "Source": "/c", "Destination": "/rw", "RW": true},
+				{"Type": "bind", "Source": "/d", "Destination": "/rw/ro", "RW": false}]}`,
+			request: `{"Binds": ["/ro/rw/x:/x", "/ro/y:/y", "/rw/ro/z:/z", "/rw/w:/w"]}`,
+			want:    `{"Binds": ["/b/x:/x", "/a/y:/y:ro", "/d/z:/z:ro", "/c/w:/w"]}`,
+		},
+		{
+			name: "nested mounts keep their own read-only",
+			container: `{"Mounts": [
+				{"Type": "bind", "Source": "/a", "Destination": "/p", "RW": false},
+				{"Type": "bind", "Source": "/b", "Destination": "/p/rw", "RW": true},
+				{"Type": "bind", "Source": "/c", "Destination": "/p/ro", "RW": false},
+				{"Type": "bind", "Source": "/e", "Destination": "/q", "RW": true},
+				{"Type": "bind", "Source": "/f", "Destination": "/q/ro", "RW": false}]}`,
+			request: `{"Binds": ["/p:/p", "/q:/q:z"], "Mounts": [{"Type": "bind", "Source": "/q", "Target": "/m"}]}`,
+			want: `{"Binds": ["/a:/p:ro", "/b:/p/rw", "/c:/p/ro:ro", "/e:/q:z", "/f:/q/ro:z,ro"], "Mounts": [
+				{"Type": "bind", "Source": "/e", "Target": "/m"},
+				{"Type": "bind", "Source": "/f", "Target": "/m/ro", "ReadOnly": true}]}`,
+		},
+		{
+			name: "read-only root",
+			container: `{"Driver": "overlay2", "GraphDriver": {"Data": {"MergedDir": "/m"}}, "HostConfig": {"ReadonlyRootfs": true},
+				"Mounts": [{"Type": "bind", "Source": "/fixtures", "Destination": "/wd", "RW": true}]}`,
+			request: `{"Binds": ["/etc:/e", "/wd:/wd"]}`,
+			want:    `{"Binds": ["/m/etc:/e:ro", "/fixtures:/wd"]}`,
 		},
 		{
 			name:      "overlayfs root",
@@ -110,7 +152,7 @@ func TestRewriteCreate(t *testing.T) {
 		},
 		{
 			name:      "unsupported driver is fine when a mount matches",
-			container: `{"Driver": "vfs", "Mounts": [{"Type": "bind", "Source": "/fixtures", "Destination": "/wd"}]}`,
+			container: `{"Driver": "vfs", "Mounts": [{"Type": "bind", "Source": "/fixtures", "Destination": "/wd", "RW": true}]}`,
 			request:   `{"Binds": ["/wd:/wd"]}`,
 			want:      `{"Binds": ["/fixtures:/wd"]}`,
 		},

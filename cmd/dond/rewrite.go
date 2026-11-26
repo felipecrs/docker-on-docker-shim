@@ -6,6 +6,7 @@ import (
 	"maps"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -16,18 +17,28 @@ type container struct {
 	Driver         string
 	ResolvConfPath string
 	GraphDriver    struct{ Data map[string]string }
-	Mounts         []struct{ Type, Source, Destination string }
-	HostConfig     struct{ UsernsMode string }
+	Mounts         []struct {
+		Type, Source, Destination string
+		RW                        bool
+	}
+	HostConfig struct {
+		UsernsMode     string
+		ReadonlyRootfs bool
+	}
 }
 
 // nestedMount is a mount of the container inside a requested source: source on the host, at rel
 // below the requested destination.
-type nestedMount struct{ source, rel string }
+type nestedMount struct {
+	source, rel string
+	readOnly    bool
+}
 
-// hostPath maps a path in the container to the host, and lists the container's mounts inside it.
-func (c *container) hostPath(source string) (string, []nestedMount, error) {
+// hostPath maps a path in the container to the host, tells whether the container sees it
+// read-only, and lists the container's mounts inside it.
+func (c *container) hostPath(source string) (string, bool, []nestedMount, error) {
 	source = path.Clean(source)
-	mapped, longest := "", -1
+	mapped, readOnly, longest := "", false, -1
 	var nested []nestedMount
 	inside := strings.TrimSuffix(source, "/") + "/"
 	for _, m := range c.Mounts {
@@ -35,20 +46,29 @@ func (c *container) hostPath(source string) (string, []nestedMount, error) {
 			continue
 		}
 		if (source == m.Destination || strings.HasPrefix(source, m.Destination+"/")) && len(m.Destination) > longest {
-			mapped, longest = m.Source+source[len(m.Destination):], len(m.Destination)
+			mapped, readOnly, longest = m.Source+source[len(m.Destination):], !m.RW, len(m.Destination)
 		}
 		if strings.HasPrefix(m.Destination, inside) {
-			nested = append(nested, nestedMount{m.Source, m.Destination[len(inside):]})
+			nested = append(nested, nestedMount{m.Source, m.Destination[len(inside):], !m.RW})
 		}
 	}
 	if longest < 0 {
 		root, err := c.root()
 		if err != nil {
-			return "", nil, err
+			return "", false, nil, err
 		}
-		mapped = root + source
+		mapped, readOnly = root+source, c.HostConfig.ReadonlyRootfs
 	}
-	return mapped, nested, nil
+	return mapped, readOnly, nested, nil
+}
+
+// readOnlyOptions returns the options of a bind with ro in place of rw.
+func readOnlyOptions(options string) string {
+	list := slices.DeleteFunc(strings.Split(options, ","), func(o string) bool { return o == "" || o == "rw" })
+	if !slices.Contains(list, "ro") {
+		list = append(list, "ro")
+	}
+	return strings.Join(list, ",")
 }
 
 // mountHolding returns the destination of the bind or volume mount that holds path, or "".
@@ -82,8 +102,9 @@ func (c *container) root() (string, error) {
 }
 
 // rewriteCreate maps the bind sources in the body of POST /containers/create. Everything else is
-// kept as it arrived, and a body with nothing to map is returned as is.
-func rewriteCreate(body []byte, mapPath func(string) (string, []nestedMount, error)) ([]byte, error) {
+// kept as it arrived, and a body with nothing to map is returned as is. A source the container
+// sees read-only is bound read-only, as a nested Docker would.
+func rewriteCreate(body []byte, mapPath func(string) (string, bool, []nestedMount, error)) ([]byte, error) {
 	var doc, host map[string]json.RawMessage
 	if json.Unmarshal(body, &doc) != nil || json.Unmarshal(doc["HostConfig"], &host) != nil {
 		return body, nil
@@ -100,18 +121,24 @@ func rewriteCreate(body []byte, mapPath func(string) (string, []nestedMount, err
 				out = append(out, bind)
 				continue
 			}
-			mapped, nested, err := mapPath(source)
+			mapped, readOnly, nested, err := mapPath(source)
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, mapped+":"+rest)
-			if mapped != source {
-				debugf("bind %s -> %s", bind, out[len(out)-1])
+			rebuilt := mapped + ":" + rest
+			if readOnly {
+				rebuilt = mapped + ":" + destination + ":" + readOnlyOptions(options)
+			}
+			out = append(out, rebuilt)
+			if rebuilt != bind {
+				debugf("bind %s -> %s", bind, rebuilt)
 				changed = true
 			}
 			for _, n := range nested {
 				extra := n.source + ":" + destination + "/" + n.rel
-				if hasOptions {
+				if n.readOnly {
+					extra += ":" + readOnlyOptions(options)
+				} else if hasOptions {
 					extra += ":" + options
 				}
 				debugf("bind %s -> + %s", bind, extra)
@@ -134,7 +161,7 @@ func rewriteCreate(body []byte, mapPath func(string) (string, []nestedMount, err
 			if kind != "bind" || !isPath(source) {
 				continue
 			}
-			mapped, nested, err := mapPath(source)
+			mapped, readOnly, nested, err := mapPath(source)
 			if err != nil {
 				return nil, err
 			}
@@ -143,12 +170,23 @@ func rewriteCreate(body []byte, mapPath func(string) (string, []nestedMount, err
 				mount["Source"], _ = json.Marshal(mapped)
 				changed = true
 			}
+			var requested bool
+			_ = json.Unmarshal(mount["ReadOnly"], &requested)
 			for _, n := range nested {
 				extra := maps.Clone(mount)
 				extra["Source"], _ = json.Marshal(n.source)
 				extra["Target"], _ = json.Marshal(target + "/" + n.rel)
 				debugf("mount %s -> + %s:%s", source, n.source, target+"/"+n.rel)
+				if n.readOnly && !requested {
+					debugf("mount %s -> read-only", n.source)
+					extra["ReadOnly"], _ = json.Marshal(true)
+				}
 				out = append(out, extra)
+				changed = true
+			}
+			if readOnly && !requested {
+				debugf("mount %s -> read-only", source)
+				mount["ReadOnly"], _ = json.Marshal(true)
 				changed = true
 			}
 		}

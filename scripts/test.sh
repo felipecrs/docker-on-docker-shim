@@ -184,6 +184,22 @@ for docker_version in "${docker_versions[@]}"; do
     docker run --rm --volume /folder:/test --volume /test:/wd:ro busybox \
     sh -c 'grep -q "^test$" /wd/testfile && grep -q "^test$" /wd/testfile2 && grep -q "^test$" /wd/only-inside-container'
 
+  # A volume, since the root of a child under userns-remap cannot write in a directory of the runner.
+  echo "A read-only mount of the container stays read-only, and a read-write one writable"
+  volume_name=$(docker volume create)
+  "${docker_args[@]}" --volume "${volume_name}:/ro:ro" --volume "${volume_name}:/rw" "${image_id}" sh -c '
+    docker run --rm --volume /ro:/x busybox sh -c "touch /x/f 2>&1 | grep -q \"Read-only file system\"" &&
+    docker run --rm --mount type=bind,source=/ro,target=/x busybox sh -c "touch /x/f 2>&1 | grep -q \"Read-only file system\"" &&
+    docker run --rm --volume /rw:/x busybox touch /x/f &&
+    docker run --rm --mount type=bind,source=/rw,target=/x busybox touch /x/f'
+  docker volume rm -f "${volume_name}" >/dev/null
+  volume_name=""
+
+  # The shim needs a writable /tmp for its socket. --mount fails instead of creating /test on the host.
+  echo "A container with a read-only root"
+  "${docker_args[@]}" --read-only --tmpfs /tmp "${image_id}" \
+    docker run --rm --mount type=bind,source=/test,target=/x busybox sh -c 'touch /x/f 2>&1 | grep -q "Read-only file system"'
+
   echo "With named volume"
   volume_name=$(docker volume create --opt type=none --opt device="${fixtures_dir}" --opt o=bind)
   # this confirms the volume works in the parent container prior to the shim

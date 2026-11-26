@@ -113,8 +113,8 @@ func TestProxyPassesRequestsThrough(t *testing.T) {
 
 func TestProxyRewritesCreate(t *testing.T) {
 	const inspect = `{"Id": "knownid0123456789", "Driver": "overlay2", "GraphDriver": {"Data": {"MergedDir": "/merged"}}, "Mounts": [
-		{"Type": "bind", "Source": "/fixtures", "Destination": "/wd"},
-		{"Type": "bind", "Source": "/host/docker.sock", "Destination": "UPSTREAM"}]}`
+		{"Type": "bind", "Source": "/fixtures", "Destination": "/wd", "RW": true},
+		{"Type": "bind", "Source": "/host/docker.sock", "Destination": "UPSTREAM", "RW": true}]}`
 	client, socket, _, received := startProxy(t, "knownid0123456789", inspect)
 	body := `{"Image": "busybox", "HostConfig": {"Binds": ["/wd/x:/x", "` + socket + `:/var/run/docker.sock"], "Mounts": [{"Type": "bind", "Source": "/only-here", "Target": "/o"}]}}`
 	// Without a length, the client sends the body in chunks.
