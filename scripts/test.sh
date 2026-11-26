@@ -33,6 +33,16 @@ fixtures_dir="$(realpath "${script_dir}/../tests/fixtures")"
 readonly fixtures_dir
 unset script_path script_dir
 
+temp_dir="$(mktemp -d)"
+readonly temp_dir
+volume_name=""
+trap 'rm -rf "${temp_dir}"; if [[ -n "${volume_name}" ]]; then docker volume rm -f "${volume_name}" >/dev/null; fi' EXIT
+
+# The daemon knows no container with this ID, as with a sidecar daemon. The shim reads the ID of
+# its container from the resolv.conf that Docker mounts.
+mkdir "${temp_dir}/dondtestunknownid"
+cp /etc/resolv.conf "${temp_dir}/dondtestunknownid/resolv.conf"
+
 # this avoids messing with the test output during the tests itself
 echo "Pulling docker images used in tests"
 docker pull -q busybox
@@ -44,73 +54,6 @@ for docker_version in "${docker_versions[@]}"; do
   echo "Testing with docker version: ${docker_version}"
 
   image_id="$(docker build --target test --build-arg "DOCKER_VERSION=${docker_version}" --quiet .)"
-
-  echo "Do not change global options or after the image"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
-    docker --host test run --volume /wd:/wd busybox --volume /wd:/wd |
-    grep -q "^docker.orig --host test run --volume ${fixtures_dir}:/wd busybox --volume /wd:/wd$"
-
-  echo "Same as above, but retaining read only mode"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
-    docker --host test run --volume /wd:/wd:ro busybox --volume /wd:/wd |
-    grep -q "^docker.orig --host test run --volume ${fixtures_dir}:/wd:ro busybox --volume /wd:/wd$"
-
-  echo "Same as above but with --mount"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
-    docker --host test run --volume /wd:/wd:ro --mount=type=bind,source=/wd,readonly,destination=/wd2 busybox --volume /wd:/wd |
-    grep -q "^docker.orig --host test run --volume ${fixtures_dir}:/wd:ro --mount=type=bind,source=${fixtures_dir},readonly,destination=/wd2 busybox --volume /wd:/wd$"
-
-  echo "Same as above (without --mount), but retaining read only mode on auto added volume"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" --volume "${fixtures_dir}:/test" --volume "${fixtures_dir}/testfile:/test/testfile" "${image_id}" \
-    docker --host test run --volume /wd:/wd:ro --volume /test:/test:ro busybox --volume /wd:/wd |
-    grep -q "^docker.orig --host test run --volume ${fixtures_dir}:/wd:ro --volume ${fixtures_dir}:/test:ro --volume ${fixtures_dir}/testfile:/test/testfile:ro busybox --volume /wd:/wd$"
-
-  echo "Same as above but should not auto add mounts which are not bind mounts"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" --volume "${fixtures_dir}:/test" --volume "${fixtures_dir}/testfile:/test/testfile" --mount type=tmpfs,target=/test/tmpfsdir "${image_id}" \
-    docker --host test run --volume /wd:/wd:ro --volume /test:/test:ro busybox --volume /wd:/wd |
-    grep -q "^docker.orig --host test run --volume ${fixtures_dir}:/wd:ro --volume ${fixtures_dir}:/test:ro --volume ${fixtures_dir}/testfile:/test/testfile:ro busybox --volume /wd:/wd$"
-
-  echo "Same as above (with --mount src and target, dst), but retaining read only mode on auto added volume"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" --volume "${fixtures_dir}:/test" --volume "${fixtures_dir}/testfile:/test/testfile" "${image_id}" \
-    docker --host test run --mount type=bind,src=/wd,target=/wd,readonly --mount type=bind,source=/test,dst=/test,readonly busybox --mount type=bind,source=/wd,destination=/wd,readonly |
-    grep -q "^docker.orig --host test run --mount type=bind,src=${fixtures_dir},target=/wd,readonly --mount type=bind,source=${fixtures_dir},dst=/test,readonly --mount type=bind,source=${fixtures_dir}/testfile,dst=/test/testfile,readonly busybox --mount type=bind,source=/wd,destination=/wd,readonly$"
-
-  echo "Same but for container run"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
-    docker --host test container run --volume /wd:/wd busybox --volume /wd:/wd |
-    grep -q "^docker.orig --host test container run --volume ${fixtures_dir}:/wd busybox --volume /wd:/wd$"
-
-  echo "Same but with an option whose value type is not only lowercase letters (uint16)"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
-    docker --host test run --blkio-weight 100 --volume /wd:/wd busybox --volume /wd:/wd |
-    grep -q "^docker.orig --host test run --blkio-weight 100 --volume ${fixtures_dir}:/wd busybox --volume /wd:/wd$"
-
-  echo "Same but with an option which is hidden from the --help output"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
-    docker --host test run --net host --volume /wd:/wd busybox --volume /wd:/wd |
-    grep -q "^docker.orig --host test run --net host --volume ${fixtures_dir}:/wd busybox --volume /wd:/wd$"
-
-  echo "Same but for create"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
-    docker --host test create --volume /wd:/wd busybox --volume /wd:/wd |
-    grep -q "^docker.orig --host test create --volume ${fixtures_dir}:/wd busybox --volume /wd:/wd$"
-
-  echo "Same but container create"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
-    docker --host test container create --volume /wd:/wd busybox --volume /wd:/wd |
-    grep -q "^docker.orig --host test container create --volume ${fixtures_dir}:/wd busybox --volume /wd:/wd$"
-
-  echo "Do not do anything for other commands"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true --volume "${fixtures_dir}:/wd" "${image_id}" \
-    docker --host test whatever --volume /wd:/wd busybox --volume /wd:/wd |
-    grep -q "^docker.orig --host test whatever --volume /wd:/wd busybox --volume /wd:/wd$"
-
-  echo "Passes through when the Docker is in a sidecar container"
-  "${docker_args[@]}" --env DOND_SHIM_PRINT_COMMAND=true \
-    --env DOCKER_HOST="unix:///nonexistent.sock" \
-    --volume "${fixtures_dir}:/wd" "${image_id}" \
-    docker run --volume /wd:/wd busybox |
-    grep -q "^docker.orig run --volume /wd:/wd busybox$"
 
   echo "Check if docker on docker is working"
   "${docker_args[@]}" "${image_id}" \
@@ -168,7 +111,6 @@ for docker_version in "${docker_versions[@]}"; do
 
   echo "With named volume"
   volume_name=$(docker volume create --opt type=none --opt device="${fixtures_dir}" --opt o=bind)
-  trap 'docker volume rm -f "${volume_name}" >/dev/null' EXIT
   # this confirms the volume works in the parent container prior to the shim
   "${docker_args[@]}" --volume "${volume_name}:/wd" "${image_id}" \
     grep -q "^test$" /wd/testfile
@@ -176,4 +118,55 @@ for docker_version in "${docker_versions[@]}"; do
     docker run --rm --volume /wd:/wd busybox \
     grep -q "^test$" /wd/testfile
   docker volume rm -f "${volume_name}" >/dev/null
+  volume_name=""
+
+  echo "With -H on the command line"
+  "${docker_args[@]}" "${image_id}" \
+    docker -H unix:///var/run/docker.sock run --rm --volume /test/only-inside-container:/only-inside-container busybox \
+    grep -q "^test$" /only-inside-container
+
+  echo "Exit code of the container"
+  exit_code=0
+  "${docker_args[@]}" "${image_id}" \
+    docker run --rm busybox sh -c 'exit 7' || exit_code=$?
+  [[ "${exit_code}" -eq 7 ]]
+
+  echo "dond wrap, with the docker shim inside, which is a wrapper inside a wrapper"
+  "${docker_args[@]}" "${image_id}" \
+    dond wrap sh -c 'docker run --rm --volume /test/only-inside-container:/only-inside-container busybox grep -q "^test$" /only-inside-container'
+
+  echo "A symlink with another name"
+  "${docker_args[@]}" "${image_id}" sh -c '
+    mkdir /tmp/bin && ln -s /usr/local/bin/docker /tmp/bin/env && export PATH="/tmp/bin:${PATH}" &&
+    env docker.orig run --rm --volume /test/only-inside-container:/only-inside-container busybox grep -q "^test$" /only-inside-container'
+
+  echo "Compose with a relative path and a path that only exists in the container"
+  "${docker_args[@]}" --volume "${fixtures_dir}:/wd" "${image_id}" sh -c '
+    if ! docker.orig compose version >/dev/null 2>&1; then
+      echo "Skipped: no Compose plugin"
+      exit 0
+    fi
+    printf "%s\n" "services:" "  test:" "    image: busybox" "    volumes:" \
+      "      - ./testfile:/testfile" "      - /test/only-inside-container:/only-inside-container" \
+      "    command: [\"sh\", \"-c\", \"grep -qx test /testfile && grep -qx test /only-inside-container\"]" \
+      >/tmp/compose.yaml
+    compose="docker compose --project-name dond-test-compose --project-directory /wd --file /tmp/compose.yaml"
+    ${compose} run --rm test
+    exit_code=$?
+    ${compose} down >/dev/null 2>&1
+    exit "${exit_code}"'
+
+  echo "Passes through when the daemon does not know the container"
+  "${docker_args[@]}" --volume "${temp_dir}/dondtestunknownid/resolv.conf:/etc/resolv.conf:ro" "${image_id}" sh -c '
+    without="$(docker.orig run --rm --volume /etc/os-release:/os-release busybox cat /os-release)" &&
+    with="$(docker run --rm --volume /etc/os-release:/os-release busybox cat /os-release)" &&
+    [ -n "${with}" ] && [ "${with}" = "${without}" ]'
+
+  echo "SIGTERM sent to the wrapper reaches the child"
+  "${docker_args[@]}" "${image_id}" sh -c '
+    dond wrap sh -c "trap \"exit 42\" TERM; sleep 30 & wait" &
+    sleep 1
+    kill -TERM $!
+    wait $!
+    [ $? -eq 42 ]'
 done

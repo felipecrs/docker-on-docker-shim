@@ -12,10 +12,14 @@ build_dir="$(realpath "${script_dir}/..")"
 readonly build_dir
 unset script_path script_dir
 
-docker build "${build_dir}" --pull --push \
+readonly platforms="linux/amd64,linux/arm64"
+
+docker buildx build "${build_dir}" --pull --push --platform "${platforms}" \
+  --build-arg "VERSION=${version}" \
   --tag "ghcr.io/felipecrs/dond-shim:${version}" \
   --tag "ghcr.io/felipecrs/dond-shim:latest"
-docker build "${build_dir}" --pull --push \
+docker buildx build "${build_dir}" --pull --push --platform "${platforms}" \
+  --build-arg "VERSION=${version}" \
   --target dond-shim-bin --tag "ghcr.io/felipecrs/dond-shim-bin:${version}" \
   --tag "ghcr.io/felipecrs/dond-shim-bin:latest"
 
