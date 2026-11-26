@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -144,13 +145,29 @@ func TestBuild(t *testing.T) {
 			"buildx", "build", "--no-cache", "-f", "-", "--ssh", "default="+key, "-o", "type=cacheonly", context)
 	})
 	t.Run("buildx create", func(t *testing.T) {
-		t.Skip("buildx stores the DOCKER_HOST of the command, the private pipe of one wrapper, as the endpoint of the builder")
+		// Each step is its own wrapper, so the builder must outlive the pipe that created it.
+		t.Setenv("BUILDX_CONFIG", t.TempDir())
+		node := "buildx_buildkit_" + testImage + "0"
+		t.Cleanup(func() {
+			_ = exec.Command(docker, "buildx", "rm", testImage).Run()
+			_ = exec.Command(docker, "rm", "-f", node).Run()
+			_ = exec.Command(docker, "volume", "rm", "-f", node+"_state").Run()
+		})
 		config := write("buildkitd.toml", "[worker.oci]\n  max-parallelism = 3\n")
-		t.Cleanup(func() { _ = exec.Command(docker, "buildx", "rm", testImage).Run() })
-		run(t, "", "buildx", "create", "--name", testImage, "--driver", "docker-container", "--buildkitd-config", config)
-		// The file is read now, so it shows up without starting the builder.
-		if out := run(t, "", "buildx", "inspect", testImage); !strings.Contains(out, "max-parallelism = 3") {
-			t.Errorf("the config was not read: %s", out)
+		run(t, "", "buildx", "create", "--name", testImage, "--driver", "docker-container", "--buildkitd-config", config, "--use")
+		// inspect exits 0 when it cannot reach the builder.
+		out := run(t, "", "buildx", "inspect", "--bootstrap")
+		for _, want := range []string{`(?m)^Name:\s+` + testImage + `$`, `(?m)^Endpoint:\s+default$`, `(?m)^Status:\s+running$`, `max-parallelism = 3`} {
+			if !regexp.MustCompile(want).MatchString(out) {
+				t.Errorf("inspect has no %q: %s", want, out)
+			}
+		}
+		dest := filepath.Join(t.TempDir(), "out")
+		run(t, "", append(append([]string{"buildx", "build", "--builder", testImage}, options...), "-o", "type=local,dest="+dest, context)...)
+		check(t, dest)
+		run(t, "", "buildx", "rm", testImage)
+		if out := run(t, "", "ps", "-a", "-q", "--filter", "name="+node) + run(t, "", "volume", "ls", "-q", "--filter", "name="+node); out != "" {
+			t.Errorf("left behind: %s", out)
 		}
 	})
 	t.Run("compose build", func(t *testing.T) {

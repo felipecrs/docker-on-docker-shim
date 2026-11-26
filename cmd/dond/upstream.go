@@ -23,9 +23,9 @@ type hostArg struct {
 	prefix string
 }
 
-// resolveUpstream returns the endpoint the command would use, in the docker CLI's own order, and
-// where -H values are. It returns "" when the command must run without the proxy.
-func resolveUpstream(isDocker bool, args []string) (string, []hostArg) {
+// resolveUpstream returns the endpoint the command would use, in the docker CLI's own order, its
+// config directory, and where -H values are. It returns "" when the command must run without the proxy.
+func resolveUpstream(isDocker bool, args []string) (string, string, []hostArg) {
 	host, configDir, defaultContext := "", os.Getenv("DOCKER_CONFIG"), false
 	var hostArgs []hostArg
 	for i := 0; isDocker && i < len(args); i++ {
@@ -40,7 +40,7 @@ func resolveUpstream(isDocker bool, args []string) (string, []hostArg) {
 			name, value, hasValue, prefix = arg[:2], arg[2:], len(arg) > 2, arg[:2]
 		}
 		if strings.HasPrefix(name, "--tls") {
-			return "", nil
+			return "", "", nil
 		}
 		if !globalOptionsWithValue[name] {
 			continue
@@ -55,7 +55,7 @@ func resolveUpstream(isDocker bool, args []string) (string, []hostArg) {
 		case "-c", "--context":
 			// The default context is DOCKER_HOST, or else the default endpoint, so the proxy can serve it.
 			if value != "default" {
-				return "", nil
+				return "", "", nil
 			}
 			defaultContext = true
 		case "-H", "--host":
@@ -66,7 +66,7 @@ func resolveUpstream(isDocker bool, args []string) (string, []hostArg) {
 		}
 	}
 	if os.Getenv("DOCKER_TLS_VERIFY") != "" || os.Getenv("DOCKER_TLS") != "" {
-		return "", nil
+		return "", "", nil
 	}
 	if host == "" {
 		host = os.Getenv("DOCKER_HOST")
@@ -74,22 +74,22 @@ func resolveUpstream(isDocker bool, args []string) (string, []hostArg) {
 	if host == "" && defaultContext {
 		host = defaultHost
 	}
+	if configDir == "" {
+		home, _ := os.UserHomeDir()
+		configDir = filepath.Join(home, ".docker")
+	}
 	if host == "" {
 		host = contextHost(configDir)
 	}
 	if network, _ := dialAddress(host); network == "" {
-		return "", nil
+		return "", "", nil
 	}
-	return host, hostArgs
+	return host, configDir, hostArgs
 }
 
 // contextHost returns the endpoint of the current docker context, or "" for one the proxy does not
 // support.
 func contextHost(configDir string) string {
-	if configDir == "" {
-		home, _ := os.UserHomeDir()
-		configDir = filepath.Join(home, ".docker")
-	}
 	name := os.Getenv("DOCKER_CONTEXT")
 	if name == "" {
 		var config struct{ CurrentContext string }
