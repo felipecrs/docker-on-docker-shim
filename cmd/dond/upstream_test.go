@@ -76,7 +76,7 @@ func TestResolveUpstream(t *testing.T) {
 				t.Setenv(name, value)
 			}
 			args := strings.Fields(tt.args)
-			got, hostArgs := resolveUpstream(!tt.notDock, args)
+			got, _, hostArgs := resolveUpstream(!tt.notDock, args)
 			if got != tt.want {
 				t.Errorf("upstream = %q, want %q", got, tt.want)
 			}
