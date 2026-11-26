@@ -53,7 +53,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin <<<"${GITHUB_TOKEN}"
 
-      # One builder for all, so that the images get the very binaries that are attached to the release.
+      # One builder for all, so that the images get the very binaries that are in the release's archives.
       - name: Build
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -63,18 +63,14 @@ jobs:
           set -x
           docker buildx create --use
           docker buildx build . --target dond-shim-bin --build-arg "VERSION=${VERSION}" \
-            --platform linux/amd64,linux/arm64,windows/amd64,windows/arm64 --output type=local,dest=dist
-          for dir in dist/*/; do
-            name="dond-$(basename "${dir}" | tr _ -)"
-            if [[ "${name}" == dond-windows-* ]]; then
-              name+=.exe
-            fi
-            mv "${dir}dond" "dist/${name}"
-            rmdir "${dir}"
+            --platform linux/amd64,linux/arm64 --output type=local,dest=build
+          DOND_SHIM_DEBUG=true build/linux_amd64/dond wrap true 2>&1 | grep -F "version ${VERSION},"
+          # named and laid out for mise's github backend: dond at the root of the archive
+          mkdir dist
+          for arch in amd64 arm64; do
+            tar -czf "dist/dond-shim-linux-${arch}.tar.gz" -C "build/linux_${arch}" dond -C "${PWD}" LICENSE
           done
           (cd dist && sha256sum -- * | tee checksums.txt)
-          # the binary acts as dond only under that name
-          (export DOND_SHIM_DEBUG=true && exec -a dond dist/dond-linux-amd64 wrap true) 2>&1 | grep -F "version ${VERSION},"
 
           for image in dond-shim dond-shim-bin; do
             args=(--tag "ghcr.io/felipecrs/${image}:${VERSION}")
