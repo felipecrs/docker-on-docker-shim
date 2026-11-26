@@ -132,6 +132,30 @@ func TestProxyRewritesCreate(t *testing.T) {
 	}
 }
 
+func TestProxyBehindAnotherProxyMapsOnce(t *testing.T) {
+	_, daemonSocket, upstreamSocket, received := startProxy(t, "knownid0123456789", `{"Driver": "overlay2", "GraphDriver": {"Data": {"MergedDir": "/merged"}}}`)
+	// A wrapper in the same container, in front of the proxy of the daemon.
+	socket := filepath.Join(t.TempDir(), "wrapper.sock")
+	p := newProxy("unix://"+daemonSocket, socket)
+	p.mountinfo = filepath.Join(filepath.Dir(daemonSocket), "mountinfo")
+	serve(t, socket, p)
+	body := `{"HostConfig": {"Binds": ["/only-here:/o", "` + socket + `:/var/run/docker.sock"]}}`
+	resp, err := unixClient(socket).Post("http://docker/containers/create", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.Header.Get(proxyHeader) == "" {
+		t.Errorf("no %s header", proxyHeader)
+	}
+	got := <-received
+	// The wrapper names the socket of the daemon's proxy, which names its own upstream.
+	want := `{"HostConfig": {"Binds": ["/merged/only-here:/o", "/merged` + upstreamSocket + `:/var/run/docker.sock"]}}`
+	if !jsonEqual(t, got.body, []byte(want)) {
+		t.Errorf("upstream got %s, want %s", got.body, want)
+	}
+}
+
 func TestProxyLeavesCreateAloneWhenTheDaemonDoesNotKnowTheContainer(t *testing.T) {
 	client, _, _, received := startProxy(t, "unknownid0123456789", "")
 	body := `{"Image": "busybox", "HostConfig": {"Binds": ["/wd:/wd"]}}`
