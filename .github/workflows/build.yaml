@@ -1,0 +1,101 @@
+name: build
+
+# Called by ci: without release on every run, and with release after all tests of a tag passed. The
+# caller gives the permissions.
+on:
+  workflow_call:
+    inputs:
+      release:
+        description: Push the images and create the GitHub release
+        type: boolean
+        default: false
+
+defaults:
+  run:
+    # unlike the default, it enables pipefail
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # to check that a tag is on master
+          fetch-depth: 0
+
+      - name: Check the version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" != tag ]]; then
+            echo "version=dev-${GITHUB_SHA::7}" >>"${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::The tag ${GITHUB_REF_NAME} is not a version such as v1.2.3 or v1.2.3-rc.1"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor HEAD origin/master; then
+            echo "::error::The tag ${GITHUB_REF_NAME} is not on master"
+            exit 1
+          fi
+          echo "version=${GITHUB_REF_NAME#v}" >>"${GITHUB_OUTPUT}"
+          # a pre-release does not move latest
+          if [[ "${GITHUB_REF_NAME}" != *-* ]]; then
+            echo "latest=true" >>"${GITHUB_OUTPUT}"
+          fi
+
+      - name: Log in to ghcr.io
+        if: inputs.release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin <<<"${GITHUB_TOKEN}"
+
+      # One builder for all, so that the images get the very binaries that are attached to the release.
+      - name: Build
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          LATEST: ${{ steps.version.outputs.latest }}
+          PUSH: ${{ inputs.release }}
+        run: |
+          set -x
+          docker buildx create --use
+          docker buildx build . --target dond-shim-bin --build-arg "VERSION=${VERSION}" \
+            --platform linux/amd64,linux/arm64,windows/amd64,windows/arm64 --output type=local,dest=dist
+          for dir in dist/*/; do
+            name="dond-$(basename "${dir}" | tr _ -)"
+            if [[ "${name}" == dond-windows-* ]]; then
+              name+=.exe
+            fi
+            mv "${dir}dond" "dist/${name}"
+            rmdir "${dir}"
+          done
+          (cd dist && sha256sum -- * | tee checksums.txt)
+          # the binary acts as dond only under that name
+          (export DOND_SHIM_DEBUG=true && exec -a dond dist/dond-linux-amd64 wrap true) 2>&1 | grep -F "version ${VERSION},"
+
+          for image in dond-shim dond-shim-bin; do
+            args=(--tag "ghcr.io/felipecrs/${image}:${VERSION}")
+            if [[ "${LATEST}" == true ]]; then
+              args+=(--tag "ghcr.io/felipecrs/${image}:latest")
+            fi
+            for label in "source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" "version=${VERSION}" "revision=${GITHUB_SHA}"; do
+              args+=(--label "org.opencontainers.image.${label}" --annotation "index,manifest:org.opencontainers.image.${label}")
+            done
+            docker buildx build . --target "${image}" --build-arg "VERSION=${VERSION}" \
+              --platform linux/amd64,linux/arm64 "${args[@]}" --output "type=image,push=${PUSH}"
+          done
+
+      - name: Create the release
+        if: inputs.release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST: ${{ steps.version.outputs.latest }}
+        run: |
+          args=()
+          if [[ "${LATEST}" != true ]]; then
+            args+=(--prerelease)
+          fi
+          gh release create "${GITHUB_REF_NAME}" --verify-tag --generate-notes "${args[@]}" dist/*
