@@ -26,7 +26,7 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock docker:latest \
   docker run --rm -v /usr/local/bin/dind:/dind alpine test -f /dind
 
 # Works: the same image, with dond installed as docker
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/felipecrs/dond:latest \
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/felipecrs/docker-on-docker-proxy:latest \
   docker run --rm -v /usr/local/bin/dind:/dind alpine test -f /dind
 ```
 
@@ -44,7 +44,7 @@ Named volumes (`-v name:/path`), `tmpfs` mounts and every other request go throu
 
 ## Installation
 
-dond is one static binary. The image `ghcr.io/felipecrs/dond` has it in two forms. Its tags follow the ones of the [Docker Official Images](https://hub.docker.com/_/docker):
+dond is one static binary. The image `ghcr.io/felipecrs/docker-on-docker-proxy` has it in two forms. Its tags follow the ones of the [Docker Official Images](https://hub.docker.com/_/docker):
 
 - `latest`, `0.10`, `0.10.0`: the [`docker`](https://hub.docker.com/_/docker) image with dond installed as `docker`
 - `bin`, `0.10-bin`, `0.10.0-bin`: only the static binary, at `/dond`, to copy into your own image
@@ -71,7 +71,7 @@ FROM docker:latest
 
 ARG DOCKER_PATH="/usr/local/bin/docker"
 RUN mv -f "${DOCKER_PATH}" "${DOCKER_PATH}.orig"
-COPY --from=ghcr.io/felipecrs/dond:0.10.0-bin /dond "${DOCKER_PATH}"
+COPY --from=ghcr.io/felipecrs/docker-on-docker-proxy:0.10.0-bin /dond "${DOCKER_PATH}"
 ```
 
 dond runs `docker.orig` from `PATH`, or else the next `docker` on `PATH` that is not dond, so a directory that comes earlier on `PATH` works too.
@@ -81,7 +81,7 @@ dond runs `docker.orig` from `PATH`, or else the next `docker` on `PATH` that is
 Leave `docker` alone, and call `dond` where the paths must be mapped:
 
 ```dockerfile
-COPY --from=ghcr.io/felipecrs/dond:0.10.0-bin /dond /usr/local/bin/dond
+COPY --from=ghcr.io/felipecrs/docker-on-docker-proxy:0.10.0-bin /dond /usr/local/bin/dond
 ```
 
 ```bash
@@ -125,7 +125,7 @@ RUN apt-get update && apt-get install -y xz-utils && \
   tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz && \
   tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz
 
-COPY --from=ghcr.io/felipecrs/dond:0.10.0-bin /dond /usr/local/bin/dond
+COPY --from=ghcr.io/felipecrs/docker-on-docker-proxy:0.10.0-bin /dond /usr/local/bin/dond
 
 # A longrun service that runs dond daemon
 RUN mkdir -p /etc/s6-overlay/s6-rc.d/dond /etc/s6-overlay/s6-rc.d/user/contents.d && \

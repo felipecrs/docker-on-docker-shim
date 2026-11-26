@@ -81,14 +81,15 @@ jobs:
           done
           (cd dist && sha256sum -- * | tee checksums.txt)
 
-          # one package: the docker image at the version's tags, and only the binary at the same ones with -bin
+          # one package, named after the repository: the docker image at the tags, and only the binary at the same ones with -bin
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
           image_args=() bin_args=()
           for tag in ${TAGS}; do
-            image_args+=(--tag "ghcr.io/felipecrs/dond:${tag}")
+            image_args+=(--tag "${image}:${tag}")
             if [[ "${tag}" == latest ]]; then
-              bin_args+=(--tag ghcr.io/felipecrs/dond:bin)
+              bin_args+=(--tag "${image}:bin")
             else
-              bin_args+=(--tag "ghcr.io/felipecrs/dond:${tag}-bin")
+              bin_args+=(--tag "${image}:${tag}-bin")
             fi
           done
           for label in "source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" "version=${VERSION}" "revision=${GITHUB_SHA}"; do

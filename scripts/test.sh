@@ -423,7 +423,7 @@ for docker_version in "${docker_versions[@]}"; do
   # The Dockerfile of the README, with dond and the docker CLI of this build.
   mkdir -p "${temp_dir}/s6"
   sed -n '/^### With s6-overlay$/,/^```$/p' "${repo_dir}/README.md" | sed '1,/^```dockerfile$/d; $d' |
-    sed 's|^COPY --from=ghcr.io/felipecrs/dond:[^ ]*-bin /dond |COPY --from=dond-test-image /usr/local/bin/docker |' \
+    sed 's|^COPY --from=ghcr.io/felipecrs/docker-on-docker-proxy:[^ ]*-bin /dond |COPY --from=dond-test-image /usr/local/bin/docker |' \
       >"${temp_dir}/s6.Dockerfile"
   grep -q "^COPY --from=dond-test-image /usr/local/bin/docker /usr/local/bin/dond$" "${temp_dir}/s6.Dockerfile"
   echo "COPY --from=dond-test-image /usr/local/bin/docker.orig /usr/local/bin/docker" >>"${temp_dir}/s6.Dockerfile"

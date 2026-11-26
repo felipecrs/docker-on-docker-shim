@@ -44,7 +44,7 @@ The version is printed in the debug output: `DOND_DEBUG=true dond wrap true`.
 
 ## Releases
 
-Push a tag such as `v1.2.3` on `master`. ci runs all tests, and then publishes `dond-linux-amd64.tar.gz` and `dond-linux-arm64.tar.gz` (each with `dond`, as `mise use github:felipecrs/docker-on-docker-proxy` expects), `checksums.txt`, the image `ghcr.io/felipecrs/dond` with the tags `1.2.3`, `1.2`, `1` and `latest`, and only the binary at the same tags with `-bin` (`bin` for `latest`), and the GitHub release with generated notes. A tag with a pre-release suffix, such as `v1.2.3-rc.1`, makes a pre-release and gets only `1.2.3-rc.1` and `1.2.3-rc.1-bin`. Major version 0 gets no tag of its own. Nothing is published from pull requests or `master`, but they run the same build. The tag is also the version of the Go module.
+Push a tag such as `v1.2.3` on `master`. ci runs all tests, and then publishes `dond-linux-amd64.tar.gz` and `dond-linux-arm64.tar.gz` (each with `dond`, as `mise use github:felipecrs/docker-on-docker-proxy` expects), `checksums.txt`, the image `ghcr.io/felipecrs/docker-on-docker-proxy` with the tags `1.2.3`, `1.2`, `1` and `latest`, and only the binary at the same tags with `-bin` (`bin` for `latest`), and the GitHub release with generated notes. A tag with a pre-release suffix, such as `v1.2.3-rc.1`, makes a pre-release and gets only `1.2.3-rc.1` and `1.2.3-rc.1-bin`. Major version 0 gets no tag of its own. Nothing is published from pull requests or `master`, but they run the same build. The tag is also the version of the Go module.
 
 Dependencies are updated by Renovate, see `renovate.json`.
 
