@@ -359,6 +359,11 @@ for docker_version in "${docker_versions[@]}"; do
   docker rm --force "${daemon_container}" >/dev/null
 
   echo "Daemon: the s6-overlay example of the README, and restart after docker stop"
+  if [[ " ${run_args[*]} " == *" --userns=host "* ]]; then
+    # The files of the image belong to the remapped root, and s6-overlay refuses such a /run.
+    echo "Skipped: s6-overlay does not start with --userns=host under userns-remap"
+    continue
+  fi
   # The Dockerfile of the README, with the shim and the docker CLI of this build.
   mkdir -p "${temp_dir}/s6"
   sed -n '/^### With s6-overlay$/,/^```$/p' "${repo_dir}/README.md" | sed '1,/^```dockerfile$/d; $d' |

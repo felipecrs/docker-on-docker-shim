@@ -102,7 +102,11 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y uidmap slirp4netns docker-ce-rootless-extras
+          sudo apt-get install -y uidmap slirp4netns
+          # The Docker of the runner image comes without the rootless extras.
+          version=$(dockerd --version | sed -E 's/^Docker version ([0-9.]+).*/\1/')
+          curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-rootless-extras-${version}.tgz" |
+            sudo tar -xz -C /usr/local/bin --strip-components 1
           if ! grep -q "^$(id -un):" /etc/subuid; then
             echo "$(id -un):100000:65536" | sudo tee -a /etc/subuid /etc/subgid
           fi
