@@ -50,8 +50,13 @@ func TestListenPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := sd.String(), "D:P(A;;FA;;;"+user.User.Sid.String()+")"; got != want {
-		t.Errorf("security descriptor %s, want %s", got, want)
+	// Built from SDDL too, as SDDL writes some accounts, like the built-in Administrator, as "LA".
+	want, err := windows.SecurityDescriptorFromString("D:P(A;;FA;;;" + user.User.Sid.String() + ")")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sd.String() != want.String() {
+		t.Errorf("security descriptor %s, want %s", sd, want)
 	}
 }
 
