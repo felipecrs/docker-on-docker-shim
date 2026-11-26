@@ -14,12 +14,12 @@ import (
 	"strings"
 	"sync"
 
-	dockerproxy "github.com/felipecrs/docker-on-docker-shim/proxy"
+	dockerproxy "github.com/felipecrs/docker-on-docker-proxy/proxy"
 )
 
 // proxyHeader is set on every response of a dond proxy, so that a dond proxy in front of it does
 // not map the paths a second time.
-const proxyHeader = "Dond-Shim-Proxy"
+const proxyHeader = "Dond-Proxy"
 
 // containerIDLine matches the resolv.conf that Docker mounts into the container.
 var containerIDLine = regexp.MustCompile(`/([a-z0-9]{12,128})/resolv.conf `)
@@ -46,14 +46,14 @@ func newProxy(upstream, socket string) *proxy {
 		return (&net.Dialer{}).DialContext(ctx, p.network, p.address)
 	})
 	p.client = &http.Client{Transport: transport}
-	p.handler = dockerproxy.New("dond-shim", transport, p.mapPath, debugf)
+	p.handler = dockerproxy.New("dond", transport, p.mapPath, debugf)
 	return p
 }
 
 // logger keeps net/http's own messages, such as a client that went away, out of the output.
 func logger() *log.Logger {
 	if debug {
-		return log.New(os.Stderr, "DEBUG(dond-shim): ", 0)
+		return log.New(os.Stderr, "DEBUG(dond): ", 0)
 	}
 	return log.New(io.Discard, "", 0)
 }

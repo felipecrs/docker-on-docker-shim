@@ -31,6 +31,7 @@ jobs:
         run: |
           if [[ "${GITHUB_REF_TYPE}" != tag ]]; then
             echo "version=dev-${GITHUB_SHA::7}" >>"${GITHUB_OUTPUT}"
+            echo "tags=dev-${GITHUB_SHA::7}" >>"${GITHUB_OUTPUT}"
             exit 0
           fi
           if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
@@ -41,11 +42,19 @@ jobs:
             echo "::error::The tag ${GITHUB_REF_NAME} is not on master"
             exit 1
           fi
-          echo "version=${GITHUB_REF_NAME#v}" >>"${GITHUB_OUTPUT}"
-          # a pre-release does not move latest
-          if [[ "${GITHUB_REF_NAME}" != *-* ]]; then
+          version="${GITHUB_REF_NAME#v}"
+          echo "version=${version}" >>"${GITHUB_OUTPUT}"
+          # as the Docker Official Images: 1.2.3, 1.2, 1 and latest, but no tag 0, and a pre-release moves none
+          tags="${version}"
+          if [[ "${version}" != *-* ]]; then
+            tags+=" ${version%.*}"
+            if [[ "${version%%.*}" != 0 ]]; then
+              tags+=" ${version%%.*}"
+            fi
+            tags+=" latest"
             echo "latest=true" >>"${GITHUB_OUTPUT}"
           fi
+          echo "tags=${tags}" >>"${GITHUB_OUTPUT}"
 
       - name: Log in to ghcr.io
         if: inputs.release
@@ -57,32 +66,39 @@ jobs:
       - name: Build
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          LATEST: ${{ steps.version.outputs.latest }}
+          TAGS: ${{ steps.version.outputs.tags }}
           PUSH: ${{ inputs.release }}
         run: |
           set -x
           docker buildx create --use
-          docker buildx build . --target dond-shim-bin --build-arg "VERSION=${VERSION}" \
+          docker buildx build . --target bin --build-arg "VERSION=${VERSION}" \
             --platform linux/amd64,linux/arm64 --output type=local,dest=build
-          DOND_SHIM_DEBUG=true build/linux_amd64/dond wrap true 2>&1 | grep -F "version ${VERSION},"
+          DOND_DEBUG=true build/linux_amd64/dond wrap true 2>&1 | grep -F "version ${VERSION},"
           # named and laid out for mise's github backend: dond at the root of the archive
           mkdir dist
           for arch in amd64 arm64; do
-            tar -czf "dist/dond-shim-linux-${arch}.tar.gz" -C "build/linux_${arch}" dond -C "${PWD}" LICENSE
+            tar -czf "dist/dond-linux-${arch}.tar.gz" -C "build/linux_${arch}" dond -C "${PWD}" LICENSE
           done
           (cd dist && sha256sum -- * | tee checksums.txt)
 
-          for image in dond-shim dond-shim-bin; do
-            args=(--tag "ghcr.io/felipecrs/${image}:${VERSION}")
-            if [[ "${LATEST}" == true ]]; then
-              args+=(--tag "ghcr.io/felipecrs/${image}:latest")
+          # one package: the docker image at the version's tags, and only the binary at the same ones with -bin
+          image_args=() bin_args=()
+          for tag in ${TAGS}; do
+            image_args+=(--tag "ghcr.io/felipecrs/dond:${tag}")
+            if [[ "${tag}" == latest ]]; then
+              bin_args+=(--tag ghcr.io/felipecrs/dond:bin)
+            else
+              bin_args+=(--tag "ghcr.io/felipecrs/dond:${tag}-bin")
             fi
-            for label in "source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" "version=${VERSION}" "revision=${GITHUB_SHA}"; do
-              args+=(--label "org.opencontainers.image.${label}" --annotation "index,manifest:org.opencontainers.image.${label}")
-            done
-            docker buildx build . --target "${image}" --build-arg "VERSION=${VERSION}" \
-              --platform linux/amd64,linux/arm64 "${args[@]}" --output "type=image,push=${PUSH}"
           done
+          for label in "source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" "version=${VERSION}" "revision=${GITHUB_SHA}"; do
+            image_args+=(--label "org.opencontainers.image.${label}" --annotation "index,manifest:org.opencontainers.image.${label}")
+            bin_args+=(--label "org.opencontainers.image.${label}" --annotation "index,manifest:org.opencontainers.image.${label}")
+          done
+          docker buildx build . --target image --build-arg "VERSION=${VERSION}" \
+            --platform linux/amd64,linux/arm64 "${image_args[@]}" --output "type=image,push=${PUSH}"
+          docker buildx build . --target bin --build-arg "VERSION=${VERSION}" \
+            --platform linux/amd64,linux/arm64 "${bin_args[@]}" --output "type=image,push=${PUSH}"
 
       - name: Create the release
         if: inputs.release

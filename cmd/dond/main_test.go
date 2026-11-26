@@ -13,10 +13,10 @@ func TestFindCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	shim, real, orig := t.TempDir(), t.TempDir(), t.TempDir()
-	// The shim's own directory comes first on PATH, as when it replaces a command.
+	wrapper, real, orig := t.TempDir(), t.TempDir(), t.TempDir()
+	// The wrapper's own directory comes first on PATH, as when it replaces a command.
 	for _, name := range []string{"foo", "docker"} {
-		if err := os.Symlink(self, filepath.Join(shim, name)); err != nil {
+		if err := os.Symlink(self, filepath.Join(wrapper, name)); err != nil {
 			t.Fatal(err)
 		}
 		writeFile(t, filepath.Join(real, name), "#!/bin/sh\n")
@@ -30,15 +30,15 @@ func TestFindCommand(t *testing.T) {
 	tests := []struct {
 		name, path, dockerPath, want string
 	}{
-		{name: "foo", path: shim + ":" + real, want: filepath.Join(real, "foo")},
-		{name: "foo", path: shim + ":relative:" + orig + ":" + real, want: filepath.Join(orig, "foo.orig")},
-		{name: "foo", path: shim},
+		{name: "foo", path: wrapper + ":" + real, want: filepath.Join(real, "foo")},
+		{name: "foo", path: wrapper + ":relative:" + orig + ":" + real, want: filepath.Join(orig, "foo.orig")},
+		{name: "foo", path: wrapper},
 		{name: "not-executable", path: real},
-		{name: "./foo", path: shim, want: "./foo"},
-		{name: "docker", path: shim + ":" + real, dockerPath: filepath.Join(orig, "foo.orig"), want: filepath.Join(orig, "foo.orig")},
-		{name: "docker", path: shim + ":" + real, dockerPath: filepath.Join(shim, "docker")},
-		{name: "docker", path: shim + ":" + real, dockerPath: "missing"},
-		{name: "foo", path: shim + ":" + real, dockerPath: "missing", want: filepath.Join(real, "foo")},
+		{name: "./foo", path: wrapper, want: "./foo"},
+		{name: "docker", path: wrapper + ":" + real, dockerPath: filepath.Join(orig, "foo.orig"), want: filepath.Join(orig, "foo.orig")},
+		{name: "docker", path: wrapper + ":" + real, dockerPath: filepath.Join(wrapper, "docker")},
+		{name: "docker", path: wrapper + ":" + real, dockerPath: "missing"},
+		{name: "foo", path: wrapper + ":" + real, dockerPath: "missing", want: filepath.Join(real, "foo")},
 	}
 	for _, tt := range tests {
 		t.Setenv("PATH", tt.path)

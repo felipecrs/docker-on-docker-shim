@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	dockerproxy "github.com/felipecrs/docker-on-docker-shim/proxy"
+	dockerproxy "github.com/felipecrs/docker-on-docker-proxy/proxy"
 )
 
-// container is what the shim needs from the inspection of the container it runs in.
+// container is what dond needs from the inspection of the container it runs in.
 type container struct {
 	ID             string `json:"Id"`
 	Image          string
@@ -83,5 +83,5 @@ func (c *container) root() (string, error) {
 			return c.ResolvConfPath[:i] + "/rootfs/overlayfs/" + c.ID, nil
 		}
 	}
-	return "", fmt.Errorf("dond-shim: unsupported storage driver %q, cannot find the container's root on the host", c.Driver)
+	return "", fmt.Errorf("dond: unsupported storage driver %q, cannot find the container's root on the host", c.Driver)
 }

@@ -23,7 +23,7 @@ func selfPath() string { return "/proc/self/exe" }
 
 // listenPrivate listens on a socket in a new temporary directory, which Close removes.
 func listenPrivate() (listener net.Listener, host, socket string, err error) {
-	dir, err := os.MkdirTemp("", "dond-shim-")
+	dir, err := os.MkdirTemp("", "dond-")
 	if err != nil {
 		return nil, "", "", err
 	}

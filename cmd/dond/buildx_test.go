@@ -10,7 +10,7 @@ import (
 )
 
 func TestFixBuildx(t *testing.T) {
-	const proxy = "unix:///tmp/dond-shim-1/docker.sock"
+	const proxy = "unix:///tmp/dond-1/docker.sock"
 	instance := func(endpoint string) string {
 		return `{"Name":"x","Driver":"docker-container","Nodes":[{"Name":"x0","Endpoint":"` + endpoint + `","Platforms":null}],"Dynamic":false}`
 	}
@@ -41,7 +41,7 @@ func TestFixBuildx(t *testing.T) {
 				}
 			}
 			write("instances/mine", instance(proxy))
-			write("instances/other", instance("unix:///tmp/dond-shim-2/docker.sock"))
+			write("instances/other", instance("unix:///tmp/dond-2/docker.sock"))
 			current := `{"Key":"` + tt.current + `","Name":"mine","Global":false}`
 			write("current", current)
 
@@ -57,7 +57,7 @@ func TestFixBuildx(t *testing.T) {
 			if got, want := read("instances/mine"), instance(tt.wantEndpoint); got != want {
 				t.Errorf("mine = %s, want %s", got, want)
 			}
-			if got, want := read("instances/other"), instance("unix:///tmp/dond-shim-2/docker.sock"); got != want {
+			if got, want := read("instances/other"), instance("unix:///tmp/dond-2/docker.sock"); got != want {
 				t.Errorf("other = %s, want %s", got, want)
 			}
 			var got struct {

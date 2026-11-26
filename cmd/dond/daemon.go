@@ -64,8 +64,8 @@ func daemon() (int, error) {
 		} else {
 			listen = filepath.Join(dir, "dond.sock")
 			p, route = newProxy("unix://"+upstream, listen), "side socket"
-			fmt.Fprintf(os.Stderr, "WARNING(dond-shim): cannot take the place of %s: %v\n", dockerSock, err)
-			fmt.Fprintf(os.Stderr, "WARNING(dond-shim): serving at %s instead: set DOCKER_HOST=unix://%s for the clients\n", listen, listen)
+			fmt.Fprintf(os.Stderr, "WARNING(dond): cannot take the place of %s: %v\n", dockerSock, err)
+			fmt.Fprintf(os.Stderr, "WARNING(dond): serving at %s instead: set DOCKER_HOST=unix://%s for the clients\n", listen, listen)
 		}
 	}
 	p.retry = true
@@ -87,7 +87,7 @@ func daemon() (int, error) {
 		}
 		return 1, err
 	}
-	fmt.Fprintf(os.Stderr, "dond-shim %s: serving at %s, forwarding to %s (%s)\n", version, listen, p.address, route)
+	fmt.Fprintf(os.Stderr, "dond %s: serving at %s, forwarding to %s (%s)\n", version, listen, p.address, route)
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT)
@@ -168,7 +168,7 @@ func (p *proxy) ownDir(dir string, mountinfo []byte) error {
 	p.inspectSelf()
 	p.inspected = true
 	if p.self == nil {
-		return fmt.Errorf("%s is a mount, and the container this runs in cannot be inspected to tell whether it belongs to the host (DOND_SHIM_DEBUG=true tells why)", dir)
+		return fmt.Errorf("%s is a mount, and the container this runs in cannot be inspected to tell whether it belongs to the host (DOND_DEBUG=true tells why)", dir)
 	}
 	if destination := p.self.mountHolding(dir); destination != "" {
 		return fmt.Errorf("%s is in the mount at %s, which may be a directory of the host: refusing to write there", dir, destination)
@@ -196,7 +196,7 @@ func (p *proxy) takeOver(dir, hostSock string) (string, error) {
 		p.inspected = true
 	}
 	if p.self == nil {
-		return "", errors.New("cannot inspect the container this runs in (DOND_SHIM_DEBUG=true tells why)")
+		return "", errors.New("cannot inspect the container this runs in (DOND_DEBUG=true tells why)")
 	}
 	// The root of this process, seen from a container in the same PID namespace. /proc/1/root is
 	// refused when the main process of the container is not root.

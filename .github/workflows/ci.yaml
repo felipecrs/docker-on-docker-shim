@@ -84,7 +84,7 @@ jobs:
         run: |
           if [[ '${{ runner.debug }}' == 1 ]]; then
             export DEBUG=true
-            export DOND_SHIM_DEBUG=true
+            export DOND_DEBUG=true
           fi
           scripts/test.sh '${{ matrix.docker-version }}'
   # The daemon under test, not the docker CLI in the image, decides how the daemon mode works.
@@ -150,7 +150,7 @@ jobs:
         run: |
           if [[ '${{ runner.debug }}' == 1 ]]; then
             export DEBUG=true
-            export DOND_SHIM_DEBUG=true
+            export DOND_DEBUG=true
           fi
           scripts/test.sh 29
   build:
