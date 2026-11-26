@@ -21,6 +21,16 @@ jobs:
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go test ./...
+  # The end to end tests of Windows skip themselves here: they need Docker in WSL.
+  go-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test ./...
   test:
     strategy:
       fail-fast: false
@@ -140,7 +150,7 @@ jobs:
           fi
           scripts/test.sh 29
   result:
-    needs: [go, test, test-daemon-variant]
+    needs: [go, go-windows, test, test-daemon-variant]
     runs-on: ubuntu-latest
     steps:
       - run: |

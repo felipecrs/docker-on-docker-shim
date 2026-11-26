@@ -23,5 +23,17 @@ docker buildx build "${build_dir}" --pull --push --platform "${platforms}" \
   --target dond-shim-bin --tag "ghcr.io/felipecrs/dond-shim-bin:${version}" \
   --tag "ghcr.io/felipecrs/dond-shim-bin:latest"
 
+# The Windows binaries, attached to the release
+dist_dir="$(mktemp -d)"
+readonly dist_dir
+trap 'rm -rf "${dist_dir}"' EXIT
+docker buildx build "${build_dir}" --pull --platform "windows/amd64,windows/arm64" \
+  --build-arg "VERSION=${version}" \
+  --target dond-shim-bin --output "type=local,dest=${dist_dir}"
+for arch in amd64 arm64; do
+  mv "${dist_dir}/windows_${arch}/dond" "${dist_dir}/dond-windows-${arch}.exe"
+done
+
 git_sha=$(git rev-parse HEAD)
-gh release create "v${version}" --title "v${version}" --target "${git_sha}"
+gh release create "v${version}" --title "v${version}" --target "${git_sha}" \
+  "${dist_dir}/dond-windows-amd64.exe" "${dist_dir}/dond-windows-arm64.exe"

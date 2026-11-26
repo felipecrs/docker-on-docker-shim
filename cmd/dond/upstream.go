@@ -7,10 +7,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
-
-const defaultHost = "unix:///var/run/docker.sock"
 
 // globalOptionsWithValue is the only knowledge of the docker command line the shim keeps.
 var globalOptionsWithValue = map[string]bool{
@@ -81,7 +80,8 @@ func resolveUpstream(isDocker bool, args []string) (string, []hostArg) {
 // support.
 func contextHost(configDir string) string {
 	if configDir == "" {
-		configDir = filepath.Join(os.Getenv("HOME"), ".docker")
+		home, _ := os.UserHomeDir()
+		configDir = filepath.Join(home, ".docker")
 	}
 	name := os.Getenv("DOCKER_CONTEXT")
 	if name == "" {
@@ -111,6 +111,14 @@ func contextHost(configDir string) string {
 
 // dialAddress returns how to reach host, or "" for a host the proxy does not support.
 func dialAddress(host string) (network, address string) {
+	if runtime.GOOS == "windows" {
+		// The default endpoint is taken for the daemon in WSL. Another one is left alone, because
+		// there is no telling whether it sees the drives of Windows.
+		if host == defaultHost {
+			return "wsl", ""
+		}
+		return "", ""
+	}
 	if path, ok := strings.CutPrefix(host, "unix://"); ok && path != "" {
 		return "unix", path
 	}

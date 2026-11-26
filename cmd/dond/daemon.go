@@ -1,3 +1,5 @@
+//go:build !windows
+
 package main
 
 import (
@@ -18,11 +20,7 @@ import (
 	"time"
 )
 
-const (
-	dockerSock = "/var/run/docker.sock"
-	// renameCommand is the first argument of the shim in the helper container of the daemon.
-	renameCommand = "dond-shim-rename"
-)
+const dockerSock = "/var/run/docker.sock"
 
 // daemon serves the proxy at /var/run/docker.sock until it is stopped, and then leaves a symlink to
 // the real socket there, so that docker keeps working.
