@@ -1,3 +1,5 @@
+//go:build linux
+
 package main
 
 import (
@@ -7,7 +9,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -118,14 +119,6 @@ func contextHost(configDir string) string {
 
 // dialAddress returns how to reach host, or "" for a host the proxy does not support.
 func dialAddress(host string) (network, address string) {
-	if runtime.GOOS == "windows" {
-		// The default endpoint is taken for the daemon in WSL. Another one is left alone, because
-		// there is no telling whether it sees the drives of Windows.
-		if host == defaultHost {
-			return "wsl", ""
-		}
-		return "", ""
-	}
 	if path, ok := strings.CutPrefix(host, "unix://"); ok && path != "" {
 		return "unix", path
 	}

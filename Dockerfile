@@ -7,8 +7,9 @@ ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION="dev"
 WORKDIR /src
-COPY go.mod go.sum ./
+COPY go.mod ./
 COPY cmd ./cmd
+COPY proxy ./proxy
 RUN CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
   go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /dond ./cmd/dond
 

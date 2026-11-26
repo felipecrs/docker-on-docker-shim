@@ -1,9 +1,8 @@
-//go:build !windows
+//go:build linux
 
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"io"
@@ -13,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 // upstreamRequest is what the fake daemon received.
@@ -83,32 +81,6 @@ func unixClient(socket string) *http.Client {
 			return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 		},
 	}}
-}
-
-func TestProxyPassesRequestsThrough(t *testing.T) {
-	client, _, _, received := startProxy(t, "knownid0123456789", `{"Driver": "overlay2", "GraphDriver": {"Data": {"MergedDir": "/merged"}}}`)
-	for _, tt := range []struct{ method, uri, body string }{
-		{"GET", "/v1.51/containers/json?all=1", ""},
-		{"POST", "/v1.51/containers/abc/start", `{"HostConfig": {"Binds": ["/a:/a"]}}`},
-		// A create with nothing to map, sent byte for byte.
-		{"POST", "/containers/create?name=x", `{"Image":"busybox",  "HostConfig": {"Binds": ["v:/v"]}}`},
-	} {
-		req, _ := http.NewRequest(tt.method, "http://docker"+tt.uri, strings.NewReader(tt.body))
-		req.Header.Set("X-Test", "kept")
-		resp, err := client.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		answer, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		got := <-received
-		if got.method != tt.method || got.uri != tt.uri || string(got.body) != tt.body || got.header != "kept" {
-			t.Errorf("upstream got %s %s %q %q, want %s %s %q", got.method, got.uri, got.body, got.header, tt.method, tt.uri, tt.body)
-		}
-		if resp.StatusCode != http.StatusCreated || resp.Header.Get("X-Answer") != "yes" || string(answer) != "answer" {
-			t.Errorf("client got %s %q %q", resp.Status, resp.Header, answer)
-		}
-	}
 }
 
 func TestProxyRewritesCreate(t *testing.T) {
@@ -185,33 +157,5 @@ func TestProxyRefusesCreateWithUnsupportedDriver(t *testing.T) {
 	}
 	if len(received) != 0 {
 		t.Error("the request reached the daemon")
-	}
-}
-
-func TestProxyRelaysUpgradedConnections(t *testing.T) {
-	_, socket, _, _ := startProxy(t, "knownid0123456789", "{}")
-	conn, err := net.Dial("unix", socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
-	// Docker sends hijack requests with an empty Host header.
-	_, _ = io.WriteString(conn, "POST /v1.51/containers/abc/attach?stream=1&stdin=1 HTTP/1.1\r\nHost: \r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n")
-	reader := bufio.NewReader(conn)
-	resp, err := http.ReadResponse(reader, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.StatusCode != http.StatusSwitchingProtocols {
-		t.Fatalf("status %s", resp.Status)
-	}
-	_, _ = io.WriteString(conn, "ping")
-	if err := conn.(*net.UnixConn).CloseWrite(); err != nil {
-		t.Fatal(err)
-	}
-	data, err := io.ReadAll(reader)
-	if string(data) != "got ping" {
-		t.Errorf("got %q, %v, want %q", data, err, "got ping")
 	}
 }

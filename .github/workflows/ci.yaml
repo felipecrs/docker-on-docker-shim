@@ -25,7 +25,7 @@ jobs:
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go test ./...
-  # The end to end tests of Windows skip themselves here: they need Docker in WSL.
+  # The proxy package is imported by docker-wsl-proxy, which runs on Windows. cmd/dond is Linux only.
   go-windows:
     runs-on: windows-latest
     steps:

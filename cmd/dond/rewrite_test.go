@@ -1,10 +1,19 @@
+//go:build linux
+
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+
+	dockerproxy "github.com/felipecrs/docker-on-docker-shim/proxy"
 )
 
 // The parent container mounts /fixtures from the host at the given destinations. The first cases
@@ -182,20 +191,37 @@ func TestRewriteCreate(t *testing.T) {
 	}
 }
 
-func TestRewriteCreateKeepsBodyWithNothingToMap(t *testing.T) {
-	c := &container{Driver: "vfs"}
-	for _, body := range []string{
-		`{"Image":"busybox",  "HostConfig": {"Binds": ["v:/v"], "Unknown": true}}`,
-		`{"Image": "busybox"}`,
-		`{"HostConfig": null}`,
-		`not json`,
-	} {
-		got, err := rewriteCreate([]byte(body), c.hostPath)
-		if err != nil || string(got) != body {
-			t.Errorf("rewriteCreate(%s) = %s, %v", body, got, err)
-		}
+// The wrapper of Linux leaves the paths of Windows alone.
+func TestRewriteCreateLeavesPathsOfWindowsOnLinux(t *testing.T) {
+	p := &proxy{inspected: true, self: &container{}}
+	body := `{"HostConfig": {"Binds": ["C:\\a:/a"], "Mounts": [{"Type": "bind", "Source": "C:\\m", "Target": "/m"}]}}`
+	got, err := rewriteCreate([]byte(body), p.mapPath)
+	if err != nil || string(got) != body {
+		t.Errorf("got %s %v", got, err)
 	}
 }
+
+// rewriteCreate sends a create body through the handler of the proxy package, and returns the body
+// that reaches the daemon, or the error message that the client gets.
+func rewriteCreate(body []byte, mapPath dockerproxy.MapFunc) ([]byte, error) {
+	var sent []byte
+	handler := dockerproxy.New("dond-shim", roundTripper(func(r *http.Request) (*http.Response, error) {
+		sent, _ = io.ReadAll(r.Body)
+		return &http.Response{StatusCode: http.StatusCreated, Header: http.Header{}, Body: http.NoBody}, nil
+	}), mapPath, debugf)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest("POST", "/v1.51/containers/create", bytes.NewReader(body)))
+	if w.Code != http.StatusCreated {
+		var answer struct{ Message string }
+		_ = json.Unmarshal(w.Body.Bytes(), &answer)
+		return nil, errors.New(answer.Message)
+	}
+	return sent, nil
+}
+
+type roundTripper func(*http.Request) (*http.Response, error)
+
+func (f roundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func jsonEqual(t *testing.T, a, b []byte) bool {
 	t.Helper()

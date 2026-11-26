@@ -1,3 +1,5 @@
+//go:build linux
+
 // Command dond runs a command behind a Docker API proxy that fixes the host paths of bind mounts
 // when the command runs in a container that uses the host's Docker daemon (docker-on-docker).
 package main
@@ -9,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -45,9 +46,6 @@ func run() (int, error) {
 		return rename(os.Args[2], os.Args[3])
 	}
 	name, args := filepath.Base(os.Args[0]), os.Args[1:]
-	if runtime.GOOS == "windows" && strings.EqualFold(filepath.Ext(name), ".exe") {
-		name = name[:len(name)-4]
-	}
 	if name == "dond" {
 		if len(args) > 0 && args[0] == "wrap" {
 			if len(args) < 2 {
@@ -122,7 +120,7 @@ func findCommand(name string) (string, error) {
 		return path, nil
 	}
 	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
-		// LookPath checks that the file is executable, and adds the extensions of PATHEXT on Windows.
+		// LookPath checks that the file is executable.
 		if path, err := exec.LookPath(filepath.Join(dir, name)); filepath.IsAbs(dir) && err == nil && !isSelf(path) {
 			return path, nil
 		}
