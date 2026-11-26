@@ -118,14 +118,18 @@ FROM ubuntu:latest
 ARG S6_OVERLAY_VERSION="3.2.1.0"
 ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz /tmp
 ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-x86_64.tar.xz /tmp
-RUN apt-get update && apt-get install -y xz-utils &&   tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz &&   tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz
+RUN apt-get update && apt-get install -y xz-utils && \
+  tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz && \
+  tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz
 
 COPY --from=ghcr.io/felipecrs/dond-shim-bin:0.10.0 /dond /usr/local/bin/dond
 
 # A longrun service that runs dond daemon
-RUN mkdir -p /etc/s6-overlay/s6-rc.d/dond /etc/s6-overlay/s6-rc.d/user/contents.d &&   echo longrun >/etc/s6-overlay/s6-rc.d/dond/type &&   printf '#!/bin/sh
-exec dond daemon
-' >/etc/s6-overlay/s6-rc.d/dond/run &&   chmod +x /etc/s6-overlay/s6-rc.d/dond/run &&   touch /etc/s6-overlay/s6-rc.d/user/contents.d/dond
+RUN mkdir -p /etc/s6-overlay/s6-rc.d/dond /etc/s6-overlay/s6-rc.d/user/contents.d && \
+  echo longrun >/etc/s6-overlay/s6-rc.d/dond/type && \
+  printf '#!/bin/sh\nexec dond daemon\n' >/etc/s6-overlay/s6-rc.d/dond/run && \
+  chmod +x /etc/s6-overlay/s6-rc.d/dond/run && \
+  touch /etc/s6-overlay/s6-rc.d/user/contents.d/dond
 
 ENTRYPOINT ["/init"]
 ```
