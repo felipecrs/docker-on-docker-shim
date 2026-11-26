@@ -1,46 +1,35 @@
+//go:build linux
+
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
-	"net/http/httputil"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
-	"time"
+
+	dockerproxy "github.com/felipecrs/docker-on-docker-shim/proxy"
 )
 
-const (
-	// maxCreateBody is the largest create body read into memory. A larger one is forwarded unchanged.
-	maxCreateBody = 4 << 20
-	// proxyHeader is set on every response of a dond proxy, so that a dond proxy in front of it
-	// does not map the paths a second time.
-	proxyHeader = "Dond-Shim-Proxy"
-)
+// proxyHeader is set on every response of a dond proxy, so that a dond proxy in front of it does
+// not map the paths a second time.
+const proxyHeader = "Dond-Shim-Proxy"
 
-var (
-	createPath = regexp.MustCompile(`^(/v[0-9.]+)?/containers/create$`)
-	// containerIDLine matches the resolv.conf that Docker mounts into the container.
-	containerIDLine = regexp.MustCompile(`/([a-z0-9]{12,128})/resolv.conf `)
-)
+// containerIDLine matches the resolv.conf that Docker mounts into the container.
+var containerIDLine = regexp.MustCompile(`/([a-z0-9]{12,128})/resolv.conf `)
 
 type proxy struct {
 	network, address string // upstream
 	socket           string // the proxy's own socket
 	mountinfo        string
-	// wslRoot, when set, gives the root of the drives in WSL, such as /mnt/, and the proxy maps the
-	// paths of Windows instead of the paths of this container.
-	wslRoot func() string
-	reverse *httputil.ReverseProxy
-	client  *http.Client
+	handler          http.Handler
+	client           *http.Client
 
 	retry bool // inspect again after a failed inspection, for a proxy that lives long
 
@@ -53,30 +42,11 @@ type proxy struct {
 func newProxy(upstream, socket string) *proxy {
 	p := &proxy{socket: socket, mountinfo: "/proc/self/mountinfo"}
 	p.network, p.address = dialAddress(upstream)
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return dialUpstream(ctx, p.network, p.address)
-		},
-		DisableCompression: true,
-		// An idle connection through wsl.exe keeps a process, and WSL, running.
-		IdleConnTimeout: 90 * time.Second,
-	}
+	transport := dockerproxy.NewTransport(func(ctx context.Context) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, p.network, p.address)
+	})
 	p.client = &http.Client{Transport: transport}
-	if p.network == "wsl" {
-		p.wslRoot = wslRoot()
-		// Pooled connections through wsl.exe would never give way to the listener under steady use.
-		onListenerFound(transport.CloseIdleConnections)
-	}
-	p.reverse = &httputil.ReverseProxy{
-		Rewrite:       func(r *httputil.ProxyRequest) { r.Out.URL.Scheme, r.Out.URL.Host = "http", "docker" },
-		FlushInterval: -1,
-		Transport:     transport,
-		ErrorLog:      logger(),
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			debugf("%s %s: %v", r.Method, r.URL.Path, err)
-			writeError(w, http.StatusBadGateway, fmt.Errorf("dond-shim: %w", err))
-		},
-	}
+	p.handler = dockerproxy.New("dond-shim", transport, p.mapPath, debugf)
 	return p
 }
 
@@ -88,44 +58,13 @@ func logger() *log.Logger {
 	return log.New(io.Discard, "", 0)
 }
 
-func writeError(w http.ResponseWriter, status int, err error) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"message": err.Error()})
-}
-
 func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(proxyHeader, version)
-	if r.Method == http.MethodPost && createPath.MatchString(r.URL.Path) {
-		body, err := io.ReadAll(io.LimitReader(r.Body, maxCreateBody+1))
-		if err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("dond-shim: %w", err))
-			return
-		}
-		if len(body) > maxCreateBody {
-			debugf("create body over %d bytes, not rewritten", maxCreateBody)
-			r.Body = struct {
-				io.Reader
-				io.Closer
-			}{io.MultiReader(bytes.NewReader(body), r.Body), r.Body}
-		} else {
-			rewritten, err := rewriteCreate(body, p.mapPath)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err)
-				return
-			}
-			r.Body, r.ContentLength, r.TransferEncoding = io.NopCloser(bytes.NewReader(rewritten)), int64(len(rewritten)), nil
-			r.Header.Set("Content-Length", strconv.Itoa(len(rewritten)))
-		}
-	}
-	p.reverse.ServeHTTP(w, r)
+	p.handler.ServeHTTP(w, r)
 }
 
-// mapPath maps a source path in this container, or of Windows, to the host.
-func (p *proxy) mapPath(source string) (string, bool, []nestedMount, error) {
-	if p.wslRoot != nil {
-		return wslPath(source, p.wslRoot), false, nil, nil
-	}
+// mapPath maps a source path in this container to the host.
+func (p *proxy) mapPath(source string) (string, bool, []dockerproxy.NestedMount, error) {
 	if !strings.HasPrefix(source, "/") {
 		return source, false, nil, nil
 	}

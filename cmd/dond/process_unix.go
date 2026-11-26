@@ -1,9 +1,8 @@
-//go:build !windows
+//go:build linux
 
 package main
 
 import (
-	"context"
 	"net"
 	"os"
 	"os/exec"
@@ -46,15 +45,6 @@ func (l dirListener) Close() error {
 	_ = os.RemoveAll(l.dir)
 	return err
 }
-
-func dialUpstream(ctx context.Context, network, address string) (net.Conn, error) {
-	return (&net.Dialer{}).DialContext(ctx, network, address)
-}
-
-// The drives of Windows are not translated outside Windows.
-func wslRoot() func() string { return nil }
-
-func onListenerFound(func()) {}
 
 // runCommand runs the command, passes signals on to it, and returns its exit code.
 func runCommand(cmd *exec.Cmd) (int, error) {

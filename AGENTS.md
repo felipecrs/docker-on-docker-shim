@@ -4,16 +4,17 @@ dond-shim makes docker-on-docker work: a container that uses the host's Docker d
 
 ## Layout
 
-The command is `cmd/dond`, a single `main` package:
+The command is `cmd/dond`, a `main` package for Linux only (every file has `//go:build linux`):
 
 - `main.go`: the entry point, `dond wrap`, `dond daemon` and the shim installed as `docker`, and how the real command is found
 - `upstream.go`: the endpoint the docker CLI would use (`-H`, `DOCKER_HOST`, contexts), and whether to run without the proxy
-- `proxy.go`: the proxy, which passes everything through and maps the paths of `POST /containers/create`
-- `rewrite.go`: the mapping of a create request, through the mounts of the container the shim runs in
+- `proxy.go`: the proxy of dond on top of the `proxy` package: the inspection of the container the shim runs in, and whether the upstream is a dond proxy already
+- `rewrite.go`: the mapping of a path, through the mounts of the container the shim runs in, or its root directory
 - `daemon.go`: `dond daemon`, which serves the proxy at `/var/run/docker.sock`
 - `process_unix.go`: the listener of the proxy, and how the child process is run and signalled
 - `*_test.go`: unit tests
-- `wsl*.go` and `*_windows*.go`: the Windows side, being moved out to its own repository
+
+The package `proxy` (`github.com/felipecrs/docker-on-docker-shim/proxy`) is the Docker API proxy itself: it forwards every request to a daemon through a dial function of the caller, and maps the bind sources of `POST /containers/create` through a mapping function of the caller. It builds on Linux and Windows, as [docker-wsl-proxy](https://github.com/felipecrs/docker-wsl-proxy) imports it to serve clients of Windows with Docker in WSL. Its API exists for that and may change in any `v0` release; change it together with docker-wsl-proxy.
 
 Also:
 
@@ -24,7 +25,7 @@ Also:
 ## Build and test
 
 ```sh
-go test ./...                 # unit tests
+go test ./...                 # unit tests; on Windows they cover the proxy package only
 scripts/test.sh 29            # container tests against the host's Docker, with the docker:29 image
 scripts/test.sh 20.10 29      # several versions, as ci does from 18.03 on
 ```
