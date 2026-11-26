@@ -134,7 +134,7 @@ dond daemon
 
 ### How it takes the place of the socket
 
-The socket of the host is a bind mount at `/var/run/docker.sock`, which a container with default permissions cannot unmount, remove or rename. The kernel refuses the rename only in the mount namespace that has the mount, so the daemon asks Docker to run a short helper container that shares its PID namespace and renames `/proc/<daemon pid>/root/run/docker.sock` to `/run/docker-host.sock`. The mount follows the rename. The helper is made from the container's own image, with the shim as entrypoint (or `mv`, when the image does not have the shim at the same path), with no network and no privilege, and is removed when done. It takes about half a second.
+The socket of the host is a bind mount at `/var/run/docker.sock`, which a container with default permissions cannot unmount, remove or rename. The kernel refuses the rename only in the mount namespace that has the mount, so the daemon asks Docker to run a short helper container that shares its PID namespace and renames `/proc/<daemon pid>/root/run/docker.sock` to `/run/docker-host.sock`. The mount follows the rename. The helper is made from the container's own image, with the shim as entrypoint (or `mv`, when the image does not have the shim at the same path), with no network and no privilege, and is removed when done. It takes 0.1 to 0.5 seconds.
 
 Every route ends in the same layout:
 
@@ -143,9 +143,10 @@ Every route ends in the same layout:
 
 At start, in this order:
 
+0. The directory of the socket, usually `/run`, must belong to the container: its root filesystem or a tmpfs. When it is a bind or volume mount, for example `-v /run:/run`, its files may be the host's, so the daemon writes nothing there and exits with an error. This needs the API only when the directory is not on the root filesystem.
 1. `/var/run/docker.sock` is a symlink to `docker-host.sock`, a socket left by a daemon that was killed, or missing, and `docker-host.sock` is the real socket: the proxy takes the place at once, with no API call. This is the state after a clean stop, with docker-outside-of-docker, and with an image that ships the symlink.
 2. `/var/run/docker.sock` is the mount: the helper renames it through `/proc/<pid>/root`.
-3. That is refused, for example because the container has a capability the helper does not have, such as `--cap-add SYS_PTRACE`: the helper renames it through the container's root directory on the host instead. This does not work when `/run` is a tmpfs.
+3. That is refused, for example because the container has a capability the helper does not have, such as `--cap-add SYS_PTRACE`: the helper renames it through the container's root filesystem on the host instead. This does not work when `/run` is a tmpfs.
 4. Neither works: the daemon prints why, and serves at `/run/dond.sock` instead. Clients must then set `DOCKER_HOST=unix:///run/dond.sock`.
 
 On a clean stop the daemon puts the symlink back. After a kill, the dead socket stays at `/var/run/docker.sock`, and docker in the container fails until the daemon is started again, which recovers, also after a restart of the container.
@@ -189,7 +190,8 @@ s6 stops the daemon with `SIGTERM`, which puts the symlink back. Clients that st
 - Docker must accept `--pid=container:<id>` from the client, or else bind mounts of the container's root directory: a socket proxy in front of Docker that refuses both leads to the side socket.
 - The daemon serves `/var/run/docker.sock` only; it ignores `DOCKER_HOST`.
 - A socket proxy already at `/var/run/docker.sock`, such as the one docker-outside-of-docker starts with `socat` for a non-root user, is left alone: the daemon refuses to start.
-- Not tested: SELinux, rootless Docker, and `userns-remap`.
+- The daemon refuses to start when the directory of the socket is a bind or volume mount, such as `-v /run:/run`, because it would rename or create files in a directory of the host.
+- Tested in CI with AppArmor, `userns-remap` (with `--userns=host` for the containers that use the socket) and rootless Docker. Not tested with SELinux.
 
 ## Environment variables
 

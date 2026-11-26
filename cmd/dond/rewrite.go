@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"path"
+	"path/filepath"
 	"strings"
 )
 
@@ -48,6 +49,21 @@ func (c *container) hostPath(source string) (string, []nestedMount, error) {
 		mapped = root + source
 	}
 	return mapped, nested, nil
+}
+
+// mountHolding returns the destination of the bind or volume mount that holds path, or "".
+func (c *container) mountHolding(path string) string {
+	for _, m := range c.Mounts {
+		// The inspection has the destination as given, such as /var/run/docker.sock for /run/docker.sock.
+		destination, err := filepath.EvalSymlinks(m.Destination)
+		if err != nil {
+			destination = m.Destination
+		}
+		if (m.Type == "bind" || m.Type == "volume") && (path == destination || strings.HasPrefix(path, destination+"/")) {
+			return m.Destination
+		}
+	}
+	return ""
 }
 
 // root returns the container's root directory on the host.

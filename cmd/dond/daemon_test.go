@@ -64,3 +64,56 @@ func TestStartState(t *testing.T) {
 		}
 	}
 }
+
+func TestMountPoint(t *testing.T) {
+	mountinfo := []byte("1 0 0:1 / / rw - overlay overlay rw\n" +
+		"2 1 0:2 / /run rw - tmpfs tmpfs rw\n" +
+		"3 2 0:3 /docker.sock /run/docker.sock rw - tmpfs tmpfs rw\n" +
+		"4 1 0:4 / /runner rw - ext4 /dev/sda1 rw\n")
+	for path, want := range map[string]string{
+		"/run": "/run", "/run/docker.sock": "/run/docker.sock", "/run/a/b": "/run",
+		"/runner/x": "/runner", "/var/run": "/", "/": "/",
+	} {
+		if got := mountPoint(path, mountinfo); got != want {
+			t.Errorf("mountPoint(%s) = %s, want %s", path, got, want)
+		}
+	}
+}
+
+func TestMountHolding(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := filepath.Join(root, "run")
+	if err := os.Mkdir(run, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "var"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// As in most images, /var/run is a symlink to /run.
+	if err := os.Symlink("../run", filepath.Join(root, "var", "run")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(run, "docker.sock"), "")
+	type mount = struct{ Type, Source, Destination string }
+	for _, tt := range []struct {
+		mount mount
+		want  bool
+	}{
+		{mount{"bind", "/host/run", run}, true},
+		{mount{"volume", "/var/lib/docker/volumes/v/_data", run}, true},
+		{mount{"bind", "/host", root}, true},
+		{mount{"bind", "/host/run", filepath.Join(root, "var", "run")}, true},
+		{mount{"tmpfs", "", run}, false},
+		// The mount of the socket itself, given through the symlink.
+		{mount{"bind", "/var/run/docker.sock", filepath.Join(root, "var", "run", "docker.sock")}, false},
+		{mount{"bind", "/host/runner", run + "ner"}, false},
+	} {
+		c := container{Mounts: []mount{tt.mount}}
+		if got := c.mountHolding(run); (got != "") != tt.want {
+			t.Errorf("mountHolding(%s) with %v = %q, want a mount: %v", run, tt.mount, got, tt.want)
+		}
+	}
+}

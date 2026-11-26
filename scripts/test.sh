@@ -295,6 +295,23 @@ for docker_version in "${docker_versions[@]}"; do
   check_daemon
   docker rm --force "${daemon_container}" >/dev/null
 
+  # A temporary directory stands for the host's /run: never mount the real one here.
+  echo "Daemon: refuses to write in a directory of the host"
+  mkdir "${temp_dir}/hostrun"
+  echo "a file that belongs to the host" >"${temp_dir}/hostrun/docker.sock"
+  run_daemon_container "${host_socket}:/var/run/docker.sock" --volume "${temp_dir}/hostrun:/run" "${image_id}" sleep 3600
+  exit_code=0
+  docker exec --user 0 "${daemon_container}" dond daemon 2>"${temp_dir}/hostrun.log" || exit_code=$?
+  sed 's/^/    /' "${temp_dir}/hostrun.log"
+  [[ "${exit_code}" -eq 1 ]]
+  grep -q "refusing to write there" "${temp_dir}/hostrun.log"
+  host_files="$(ls -A "${temp_dir}/hostrun")"
+  [[ "${host_files}" == "docker.sock" ]]
+  grep -qx "a file that belongs to the host" "${temp_dir}/hostrun/docker.sock"
+  in_daemon_container docker.orig version >/dev/null
+  docker rm --force "${daemon_container}" >/dev/null
+  rm -r "${temp_dir}/hostrun"
+
   echo "Daemon: an image where /var/run is a directory, not a symlink to /run, and restart after a clean stop"
   printf '%s\n' "FROM dond-test-image" "RUN rm /var/run && mkdir /var/run" |
     docker build --quiet --tag dond-test-varrun - >/dev/null

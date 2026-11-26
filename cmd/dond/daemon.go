@@ -39,6 +39,15 @@ func daemon() (int, error) {
 	if err != nil {
 		return 1, err
 	}
+	upstream := hostSock
+	if route == "mount" {
+		upstream = path // until the rename
+	}
+	p := newProxy("unix://"+upstream, "")
+	// Every route writes in dir, which must not be a directory of the host.
+	if err := p.ownDir(dir, mountinfo); err != nil {
+		return 1, err
+	}
 	// The socket is made aside first: renaming the mount is only worth it once the proxy can listen,
 	// and renaming the socket into place leaves no moment without a socket at the path.
 	tmp := path + ".dond"
@@ -48,14 +57,15 @@ func daemon() (int, error) {
 		return 1, err
 	}
 	listener.(*net.UnixListener).SetUnlinkOnClose(false)
-	p, listen := newProxy("unix://"+hostSock, ""), path
+	listen := path
 	if route == "mount" {
 		start := time.Now()
 		if route, err = p.takeOver(dir, hostSock); err == nil {
+			p.address = hostSock
 			route += fmt.Sprintf(", %d ms", time.Since(start).Milliseconds())
 		} else {
 			listen = filepath.Join(dir, "dond.sock")
-			p, route = newProxy("unix://"+dockerSock, listen), "side socket"
+			p, route = newProxy("unix://"+upstream, listen), "side socket"
 			fmt.Fprintf(os.Stderr, "WARNING(dond-shim): cannot take the place of %s: %v\n", dockerSock, err)
 			fmt.Fprintf(os.Stderr, "WARNING(dond-shim): serving at %s instead: set DOCKER_HOST=unix://%s for the clients\n", listen, listen)
 		}
@@ -66,7 +76,8 @@ func daemon() (int, error) {
 	if err == nil {
 		stat := info.Sys().(*syscall.Stat_t)
 		if err = os.Chown(tmp, int(stat.Uid), int(stat.Gid)); err == nil {
-			if err = os.Chmod(tmp, info.Mode().Perm()); err == nil {
+			// With the special bits: rootless Docker sets the sticky bit on its socket.
+			if err = os.Chmod(tmp, info.Mode()&(fs.ModePerm|fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky)); err == nil {
 				err = os.Rename(tmp, listen)
 			}
 		}
@@ -109,10 +120,8 @@ func daemon() (int, error) {
 // "dead socket" (left by a daemon that was killed) or "nothing", where the proxy can take the place
 // at once.
 func startState(path, hostSock string, mountinfo []byte) (string, error) {
-	for _, line := range strings.Split(string(mountinfo), "\n") {
-		if fields := strings.Fields(line); len(fields) > 4 && fields[4] == path {
-			return "mount", nil
-		}
+	if mountPoint(path, mountinfo) == path {
+		return "mount", nil
 	}
 	if !alive(hostSock) {
 		return "", fmt.Errorf("no Docker socket at %s or %s: start the container with -v %s:%s", path, hostSock, dockerSock, dockerSock)
@@ -139,6 +148,36 @@ func startState(path, hostSock string, mountinfo []byte) (string, error) {
 	return "", fmt.Errorf("%s is in use by something else, such as another dond daemon", path)
 }
 
+// mountPoint returns the mount point in mountinfo that holds path.
+func mountPoint(path string, mountinfo []byte) string {
+	point := ""
+	for _, line := range strings.Split(string(mountinfo), "\n") {
+		if fields := strings.Fields(line); len(fields) > 4 && len(fields[4]) > len(point) &&
+			(fields[4] == "/" || path == fields[4] || strings.HasPrefix(path, fields[4]+"/")) {
+			point = fields[4]
+		}
+	}
+	return point
+}
+
+// ownDir returns an error when dir may be a directory of the host, a bind or volume mount of the
+// container, where a rename or a new file would change the host. The API is needed only when dir is
+// not on the container's root filesystem.
+func (p *proxy) ownDir(dir string, mountinfo []byte) error {
+	if mountPoint(dir, mountinfo) == "/" {
+		return nil
+	}
+	p.inspectSelf()
+	p.inspected = true
+	if p.self == nil {
+		return fmt.Errorf("%s is a mount, and the container this runs in cannot be inspected to tell whether it belongs to the host (DOND_SHIM_DEBUG=true tells why)", dir)
+	}
+	if destination := p.self.mountHolding(dir); destination != "" {
+		return fmt.Errorf("%s is in the mount at %s, which may be a directory of the host: refusing to write there", dir, destination)
+	}
+	return nil
+}
+
 func alive(socket string) bool {
 	conn, err := net.Dial("unix", socket)
 	if err == nil {
@@ -154,11 +193,10 @@ func (p *proxy) takeOver(dir, hostSock string) (string, error) {
 	if os.Geteuid() != 0 {
 		return "", errors.New("dond daemon must run as root")
 	}
-	// Until the rename, the real socket is still at its place. After it, at hostSock.
-	p.address = filepath.Join(dir, "docker.sock")
-	defer func() { p.address = hostSock }()
-	p.inspectSelf()
-	p.inspected = true
+	if !p.inspected {
+		p.inspectSelf()
+		p.inspected = true
+	}
 	if p.self == nil {
 		return "", errors.New("cannot inspect the container this runs in (DOND_SHIM_DEBUG=true tells why)")
 	}
@@ -171,10 +209,11 @@ func (p *proxy) takeOver(dir, hostSock string) (string, error) {
 	}
 	debugf("helper through %s: %v", root, errPID)
 	// Not possible when dir is a tmpfs, which the host does not see.
-	hostDir, _, err := p.self.hostPath(dir)
+	hostRoot, err := p.self.root()
 	if err != nil {
 		return "", fmt.Errorf("through %s: %w; through the host: %w", root, errPID, err)
 	}
+	hostDir := hostRoot + dir
 	errHost := p.helper(map[string]any{"Binds": []string{hostDir + ":/dond-run"}}, "/dond-run/docker.sock", "/dond-run/"+filepath.Base(hostSock))
 	if errHost == nil {
 		return "helper through " + hostDir + " on the host", nil
