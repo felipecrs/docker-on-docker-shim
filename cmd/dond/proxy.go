@@ -16,8 +16,13 @@ import (
 	"sync"
 )
 
-// maxCreateBody is the largest create body read into memory. A larger one is forwarded unchanged.
-const maxCreateBody = 4 << 20
+const (
+	// maxCreateBody is the largest create body read into memory. A larger one is forwarded unchanged.
+	maxCreateBody = 4 << 20
+	// proxyHeader is set on every response of a dond proxy, so that a dond proxy in front of it
+	// does not map the paths a second time.
+	proxyHeader = "Dond-Shim-Proxy"
+)
 
 var (
 	createPath = regexp.MustCompile(`^(/v[0-9.]+)?/containers/create$`)
@@ -32,8 +37,12 @@ type proxy struct {
 	reverse          *httputil.ReverseProxy
 	client           *http.Client
 
-	once sync.Once
-	self *container // nil when the daemon does not know the container this runs in
+	retry bool // inspect again after a failed inspection, for a proxy that lives long
+
+	mu        sync.Mutex
+	inspected bool
+	self      *container // nil when the daemon does not know the container this runs in
+	chained   bool       // the upstream is a dond proxy, which maps the paths itself
 }
 
 func newProxy(upstream, socket string) *proxy {
@@ -74,6 +83,7 @@ func writeError(w http.ResponseWriter, status int, err error) {
 }
 
 func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set(proxyHeader, version)
 	if r.Method == http.MethodPost && createPath.MatchString(r.URL.Path) {
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxCreateBody+1))
 		if err != nil {
@@ -101,15 +111,24 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // mapPath maps a source path in this container to the host.
 func (p *proxy) mapPath(source string) (string, []nestedMount, error) {
-	p.once.Do(p.inspectSelf)
-	if p.self == nil {
+	p.mu.Lock()
+	if !p.inspected || (p.self == nil && !p.chained && p.retry) {
+		p.inspected = true
+		p.inspectSelf()
+	}
+	self, chained := p.self, p.chained
+	p.mu.Unlock()
+	if self == nil && !chained {
 		return source, nil, nil
 	}
 	// Testcontainers mounts the socket that DOCKER_HOST names into its Ryuk container.
 	if source == p.socket && p.network == "unix" {
 		source = p.address
 	}
-	return p.self.hostPath(source)
+	if chained {
+		return source, nil, nil
+	}
+	return self.hostPath(source)
 }
 
 func (p *proxy) inspectSelf() {
@@ -129,7 +148,10 @@ func (p *proxy) inspectSelf() {
 	}
 	defer resp.Body.Close()
 	var c container
-	if resp.StatusCode != http.StatusOK {
+	if resp.Header.Get(proxyHeader) != "" {
+		debugf("the upstream is a dond proxy, which maps the paths itself")
+		p.chained = true
+	} else if resp.StatusCode != http.StatusOK {
 		debugf("inspect %s: %s, not rewriting", id, resp.Status)
 	} else if err := json.NewDecoder(resp.Body).Decode(&c); err != nil {
 		debugf("inspect %s: %v, not rewriting", id, err)

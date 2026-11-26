@@ -42,6 +42,9 @@ func main() {
 }
 
 func run() (int, error) {
+	if len(os.Args) == 4 && os.Args[1] == renameCommand {
+		return rename(os.Args[2], os.Args[3])
+	}
 	name, args := filepath.Base(os.Args[0]), os.Args[1:]
 	if name == "dond" {
 		if len(args) > 0 && args[0] == "wrap" {
@@ -49,6 +52,11 @@ func run() (int, error) {
 				return 1, errors.New("usage: dond wrap <command> [args...]")
 			}
 			name, args = args[1], args[2:]
+		} else if len(args) > 0 && args[0] == "daemon" {
+			if len(args) > 1 {
+				return 1, errors.New("usage: dond daemon")
+			}
+			return daemon()
 		} else {
 			name = "docker"
 		}

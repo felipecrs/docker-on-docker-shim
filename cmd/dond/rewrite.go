@@ -11,6 +11,7 @@ import (
 // container is what the shim needs from the inspection of the container it runs in.
 type container struct {
 	ID             string `json:"Id"`
+	Image          string
 	Driver         string
 	ResolvConfPath string
 	GraphDriver    struct{ Data map[string]string }
