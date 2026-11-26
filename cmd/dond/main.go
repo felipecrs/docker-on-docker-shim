@@ -16,27 +16,27 @@ import (
 
 const (
 	// proxyEnv tells a wrapper started by another wrapper that the command is proxied already.
-	proxyEnv      = "DOND_SHIM_PROXY"
-	dockerPathEnv = "DOND_SHIM_DOCKER_PATH"
-	// renameCommand is the first argument of the shim in the helper container of the daemon.
-	renameCommand = "dond-shim-rename"
+	proxyEnv      = "DOND_PROXY"
+	dockerPathEnv = "DOND_DOCKER_PATH"
+	// renameCommand is the first argument of dond in the helper container of the daemon.
+	renameCommand = "dond-rename"
 )
 
 // version is set at build time.
 var version = "dev"
 
-var debug = os.Getenv("DOND_SHIM_DEBUG") == "true"
+var debug = os.Getenv("DOND_DEBUG") == "true"
 
 func debugf(format string, args ...any) {
 	if debug {
-		fmt.Fprintf(os.Stderr, "DEBUG(dond-shim): "+format+"\n", args...)
+		fmt.Fprintf(os.Stderr, "DEBUG(dond): "+format+"\n", args...)
 	}
 }
 
 func main() {
 	code, err := run()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR(dond-shim):", err)
+		fmt.Fprintln(os.Stderr, "ERROR(dond):", err)
 	}
 	os.Exit(code)
 }
@@ -65,7 +65,7 @@ func run() (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	if os.Getenv("DOND_SHIM_SKIP") == "true" {
+	if os.Getenv("DOND_SKIP") == "true" {
 		return execCommand(path, name, args)
 	}
 	upstream, configDir, hostArgs := resolveUpstream(filepath.Base(name) == "docker", args)
@@ -76,7 +76,7 @@ func run() (int, error) {
 
 	listener, proxyHost, socket, err := listenPrivate()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "WARNING(dond-shim): running without the proxy:", err)
+		fmt.Fprintln(os.Stderr, "WARNING(dond): running without the proxy:", err)
 		return execCommand(path, name, args)
 	}
 	defer listener.Close()
@@ -95,7 +95,7 @@ func run() (int, error) {
 	return code, err
 }
 
-// findCommand returns the real command for name: DOND_SHIM_DOCKER_PATH for docker, else
+// findCommand returns the real command for name: DOND_DOCKER_PATH for docker, else
 // <name>.orig, else the next <name> on PATH that is not this binary.
 func findCommand(name string) (string, error) {
 	self, _ := os.Stat(selfPath())
@@ -109,7 +109,7 @@ func findCommand(name string) (string, error) {
 			return "", fmt.Errorf("%s (%s) points to a non-existing file or command", dockerPathEnv, custom)
 		}
 		if isSelf(path) {
-			return "", fmt.Errorf("%s (%s) points to this shim", dockerPathEnv, custom)
+			return "", fmt.Errorf("%s (%s) points to dond itself", dockerPathEnv, custom)
 		}
 		return path, nil
 	}

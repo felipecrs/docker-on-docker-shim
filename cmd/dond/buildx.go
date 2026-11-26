@@ -53,7 +53,7 @@ func rewriteFile(path string, change func([]byte) []byte) {
 	if bytes.Equal(changed, data) {
 		return
 	}
-	temp, err := os.CreateTemp(filepath.Dir(path), ".dond-shim-*")
+	temp, err := os.CreateTemp(filepath.Dir(path), ".dond-*")
 	if err != nil {
 		debugf("buildx: %v", err)
 		return

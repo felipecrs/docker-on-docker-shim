@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// globalOptionsWithValue is the only knowledge of the docker command line the shim keeps.
+// globalOptionsWithValue is the only knowledge of the docker command line dond keeps.
 var globalOptionsWithValue = map[string]bool{
 	"--config": true, "-c": true, "--context": true, "-H": true, "--host": true, "-l": true,
 	"--log-level": true, "--tlscacert": true, "--tlscert": true, "--tlskey": true,

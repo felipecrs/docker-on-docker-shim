@@ -14,7 +14,7 @@ RUN CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
   go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /dond ./cmd/dond
 
 
-FROM scratch AS dond-shim-bin
+FROM scratch AS bin
 
 COPY --from=build /dond /
 
@@ -22,14 +22,14 @@ COPY --from=build /dond /
 FROM docker:${DOCKER_VERSION} AS docker
 
 
-FROM docker AS dond-shim
+FROM docker AS image
 
-# Install dond-shim, with COPY instead of RUN so that other platforms build without emulation
+# Install dond as docker, with COPY instead of RUN so that other platforms build without emulation
 ARG DOCKER_PATH="/usr/local/bin/docker"
 COPY --from=docker "${DOCKER_PATH}" "${DOCKER_PATH}.orig"
-COPY --from=dond-shim-bin /dond "${DOCKER_PATH}"
+COPY --from=bin /dond "${DOCKER_PATH}"
 
-FROM dond-shim AS test
+FROM image AS test
 
 # Create fixtures, and dond for the tests of dond wrap
 RUN mkdir -p /test && \
@@ -40,4 +40,4 @@ RUN mkdir -p /test && \
 ENTRYPOINT []
 
 # Set default stage
-FROM dond-shim
+FROM image

@@ -152,7 +152,7 @@ func TestProxyRefusesCreateWithUnsupportedDriver(t *testing.T) {
 	var answer struct{ Message string }
 	_ = json.NewDecoder(resp.Body).Decode(&answer)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusInternalServerError || !strings.HasPrefix(answer.Message, `dond-shim: unsupported storage driver "vfs"`) {
+	if resp.StatusCode != http.StatusInternalServerError || !strings.HasPrefix(answer.Message, `dond: unsupported storage driver "vfs"`) {
 		t.Errorf("got %s %q", resp.Status, answer.Message)
 	}
 	if len(received) != 0 {

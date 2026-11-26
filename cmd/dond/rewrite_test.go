@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	dockerproxy "github.com/felipecrs/docker-on-docker-shim/proxy"
+	dockerproxy "github.com/felipecrs/docker-on-docker-proxy/proxy"
 )
 
 // The parent container mounts /fixtures from the host at the given destinations. The first cases
@@ -21,7 +21,7 @@ import (
 func TestRewriteCreate(t *testing.T) {
 	tests := []struct {
 		name      string
-		container string // JSON of the inspection of the container the shim runs in
+		container string // JSON of the inspection of the container dond runs in
 		request   string // HostConfig of the request
 		want      string // HostConfig expected, or the start of the error
 	}{
@@ -157,7 +157,7 @@ func TestRewriteCreate(t *testing.T) {
 			name:      "unsupported driver",
 			container: `{"Driver": "vfs"}`,
 			request:   `{"Binds": ["/only-inside-container:/x"]}`,
-			want:      "dond-shim: unsupported storage driver \"vfs\"",
+			want:      "dond: unsupported storage driver \"vfs\"",
 		},
 		{
 			name:      "unsupported driver is fine when a mount matches",
@@ -174,7 +174,7 @@ func TestRewriteCreate(t *testing.T) {
 			}
 			body := `{"Image": "busybox", "Unknown": {"Kept": [1, 2]}, "HostConfig": ` + tt.request + `}`
 			got, err := rewriteCreate([]byte(body), c.hostPath)
-			if strings.HasPrefix(tt.want, "dond-shim:") {
+			if strings.HasPrefix(tt.want, "dond:") {
 				if err == nil || !strings.HasPrefix(err.Error(), tt.want) {
 					t.Fatalf("error = %v, want %s", err, tt.want)
 				}
@@ -205,7 +205,7 @@ func TestRewriteCreateLeavesPathsOfWindowsOnLinux(t *testing.T) {
 // that reaches the daemon, or the error message that the client gets.
 func rewriteCreate(body []byte, mapPath dockerproxy.MapFunc) ([]byte, error) {
 	var sent []byte
-	handler := dockerproxy.New("dond-shim", roundTripper(func(r *http.Request) (*http.Response, error) {
+	handler := dockerproxy.New("dond", roundTripper(func(r *http.Request) (*http.Response, error) {
 		sent, _ = io.ReadAll(r.Body)
 		return &http.Response{StatusCode: http.StatusCreated, Header: http.Header{}, Body: http.NoBody}, nil
 	}), mapPath, debugf)

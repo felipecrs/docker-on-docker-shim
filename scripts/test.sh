@@ -32,7 +32,7 @@ readonly host_socket
 read -r -a run_args <<<"${TEST_DOCKER_RUN_ARGS:-}"
 readonly run_args
 
-readonly docker_args=(docker run --rm "${run_args[@]}" --env DOND_SHIM_DEBUG --volume "${host_socket}:/var/run/docker.sock")
+readonly docker_args=(docker run --rm "${run_args[@]}" --env DOND_DEBUG --volume "${host_socket}:/var/run/docker.sock")
 
 # Find fixtures directory
 script_path=$(realpath "$0")
@@ -48,7 +48,7 @@ volume_name=""
 readonly daemon_container=dond-test-daemon proxy_container=dond-test-proxy
 trap 'rm -rf "${temp_dir}"; docker rm -f "${daemon_container}" "${proxy_container}" >/dev/null 2>&1 || true; docker image rm -f dond-test-image dond-test-varrun dond-test-s6 >/dev/null 2>&1 || true; docker rm -f buildx_buildkit_dond-test-buildx0 >/dev/null 2>&1 || true; docker volume rm -f buildx_buildkit_dond-test-buildx0_state >/dev/null 2>&1 || true; if [[ -n "${volume_name}" ]]; then docker volume rm -f "${volume_name}" >/dev/null; fi' EXIT
 
-# The daemon knows no container with this ID, as with a sidecar daemon. The shim reads the ID of
+# The daemon knows no container with this ID, as with a sidecar daemon. dond reads the ID of
 # its container from the resolv.conf that Docker mounts.
 mkdir "${temp_dir}/dondtestunknownid"
 cp /etc/resolv.conf "${temp_dir}/dondtestunknownid/resolv.conf"
@@ -63,7 +63,7 @@ done
 
 # Starts the container of the daemon tests: run_daemon_container <socket volume> <docker run arguments...>
 run_daemon_container() {
-  docker run --detach --name "${daemon_container}" "${run_args[@]}" --env DOND_SHIM_DEBUG \
+  docker run --detach --name "${daemon_container}" "${run_args[@]}" --env DOND_DEBUG \
     --volume "$1" --volume "${fixtures_dir}:/wd" "${@:2}" >/dev/null
 }
 
@@ -195,14 +195,14 @@ for docker_version in "${docker_versions[@]}"; do
   docker volume rm -f "${volume_name}" >/dev/null
   volume_name=""
 
-  # The shim needs a writable /tmp for its socket. --mount fails instead of creating /test on the host.
+  # The wrapper needs a writable /tmp for its socket. --mount fails instead of creating /test on the host.
   echo "A container with a read-only root"
   "${docker_args[@]}" --read-only --tmpfs /tmp "${image_id}" \
     docker run --rm --mount type=bind,source=/test,target=/x busybox sh -c 'touch /x/f 2>&1 | grep -q "Read-only file system"'
 
   echo "With named volume"
   volume_name=$(docker volume create --opt type=none --opt device="${fixtures_dir}" --opt o=bind)
-  # this confirms the volume works in the parent container prior to the shim
+  # this confirms the volume works in the parent container without dond
   "${docker_args[@]}" --volume "${volume_name}:/wd" "${image_id}" \
     grep -q "^test$" /wd/testfile
   "${docker_args[@]}" --volume "${volume_name}:/wd" "${image_id}" \
@@ -222,7 +222,7 @@ for docker_version in "${docker_versions[@]}"; do
     docker run --rm busybox sh -c 'exit 7' || exit_code=$?
   [[ "${exit_code}" -eq 7 ]]
 
-  echo "dond wrap, with the docker shim inside, which is a wrapper inside a wrapper"
+  echo "dond wrap, with dond as docker inside, which is a wrapper inside a wrapper"
   "${docker_args[@]}" "${image_id}" \
     dond wrap sh -c 'docker run --rm --volume /test/only-inside-container:/only-inside-container busybox grep -q "^test$" /only-inside-container'
 
@@ -264,7 +264,7 @@ for docker_version in "${docker_versions[@]}"; do
     printf "%s\n" "FROM busybox" "RUN echo built" | docker buildx build --builder "${builder}" --quiet --output type=cacheonly - >/dev/null
     docker buildx rm "${builder}"
     [ -z "$(docker.orig ps -aq --filter "name=${node}")$(docker.orig volume ls -q --filter "name=${node}")" ]
-    echo "  create --use in a script, through the docker shim inside dond wrap"
+    echo "  create --use in a script, through dond as docker inside dond wrap"
     dond wrap sh -c "docker buildx create --name ${builder} --driver docker-container --use >/dev/null"
     docker buildx inspect | grep -Eq "^Name:[[:space:]]+${builder}$"
     docker buildx rm "${builder}"'
@@ -403,8 +403,8 @@ for docker_version in "${docker_versions[@]}"; do
   in_daemon_container sh -c '[ ! -e /run/dond.sock ] && docker.orig version >/dev/null'
   docker rm --force "${daemon_container}" "${proxy_container}" >/dev/null
 
-  # The helper cannot start the shim from the image, and runs mv instead.
-  echo "Daemon: the official image, with the shim mounted from outside"
+  # The helper cannot start dond from the image, and runs mv instead.
+  echo "Daemon: the official image, with dond mounted from outside"
   docker run --rm --entrypoint cat "${image_id}" /usr/local/bin/docker >"${temp_dir}/dond"
   chmod +x "${temp_dir}/dond"
   run_daemon_container "${host_socket}:/var/run/docker.sock" --volume "${temp_dir}/dond:/usr/local/bin/dond:ro" \
@@ -420,10 +420,10 @@ for docker_version in "${docker_versions[@]}"; do
     echo "Skipped: s6-overlay does not start with --userns=host under userns-remap"
     continue
   fi
-  # The Dockerfile of the README, with the shim and the docker CLI of this build.
+  # The Dockerfile of the README, with dond and the docker CLI of this build.
   mkdir -p "${temp_dir}/s6"
   sed -n '/^### With s6-overlay$/,/^```$/p' "${repo_dir}/README.md" | sed '1,/^```dockerfile$/d; $d' |
-    sed 's|^COPY --from=ghcr.io/felipecrs/dond-shim-bin:[^ ]* /dond |COPY --from=dond-test-image /usr/local/bin/docker |' \
+    sed 's|^COPY --from=ghcr.io/felipecrs/docker-on-docker-proxy:[^ ]*-bin /dond |COPY --from=dond-test-image /usr/local/bin/docker |' \
       >"${temp_dir}/s6.Dockerfile"
   grep -q "^COPY --from=dond-test-image /usr/local/bin/docker /usr/local/bin/dond$" "${temp_dir}/s6.Dockerfile"
   echo "COPY --from=dond-test-image /usr/local/bin/docker.orig /usr/local/bin/docker" >>"${temp_dir}/s6.Dockerfile"
