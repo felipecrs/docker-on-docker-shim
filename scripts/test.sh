@@ -250,7 +250,8 @@ for docker_version in "${docker_versions[@]}"; do
   start_daemon
   check_daemon
   echo "Daemon: the proxy's socket has the owner, group and mode of the real one"
-  in_daemon_container sh -c '[ "$(stat -L -c %u:%g:%a /var/run/docker-host.sock)" = "$(stat -c %u:%g:%a /var/run/docker.sock)" ]'
+  in_daemon_container sh -c 'real="$(stat -L -c %u:%g:%a /var/run/docker-host.sock)" proxy="$(stat -c %u:%g:%a /var/run/docker.sock)"
+    [ "${real}" = "${proxy}" ] || { echo "real socket ${real}, proxy socket ${proxy}"; ls -ln /run; exit 1; }'
   echo "Daemon: a child container that mounts the socket gets the real one"
   in_daemon_container docker.orig run --rm "${run_args[@]}" --volume /var/run/docker.sock:/var/run/docker.sock "${image_id}" \
     docker.orig version >/dev/null
