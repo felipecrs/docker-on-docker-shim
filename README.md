@@ -236,6 +236,8 @@ After=docker.socket
 ExecStart=/usr/bin/socat -t 86400 VSOCK-LISTEN:2375,fork UNIX-CONNECT:/run/docker.sock
 DynamicUser=yes
 SupplementaryGroups=docker
+# socat ends with 143 on SIGTERM.
+SuccessExitStatus=143
 
 [Install]
 WantedBy=multi-user.target
@@ -245,7 +247,7 @@ sudo systemctl enable --now dond-vsock.service
 
 `systemd-socket-proxyd` does not work for this: an attach without input, such as `docker run` without `-i`, loses the output.
 
-The listener gives the Docker socket, which is root in WSL, to whoever can open a Hyper-V socket to the VM of WSL: processes of your Windows user. Whether other Windows users or administrators can, and whether users in WSL outside the `docker` group can reach it through vsock, was not tested.
+The listener gives the Docker socket, which is root in WSL, to whoever can open a Hyper-V socket to the VM of WSL: processes of your Windows user. Users in WSL outside the `docker` group cannot reach it, as vsock in WSL has no loopback. Whether other Windows users or administrators can was not tested.
 
 ### `dond daemon` on Windows
 
@@ -253,10 +255,10 @@ The listener gives the Docker socket, which is root in WSL, to whoever can open 
 
 ### Limits on Windows
 
-- Only the default endpoint, `npipe:////./pipe/docker_engine` with no `-H`, `DOCKER_HOST` or other context, is taken for the daemon in WSL. Another endpoint runs without the proxy.
+- Only the default endpoint, `npipe:////./pipe/docker_engine` with no `-H`, `DOCKER_HOST` or context other than `default`, is taken for the daemon in WSL. Another endpoint runs without the proxy.
 - `\\wsl.localhost\<distro>\…` is taken for the distribution of the daemon, whatever its name.
 - Paths of network shares, and `device=C:\…` in the options of a volume, are left as they are.
-- `docker buildx create` with the `docker-container` driver stores the endpoint of the command, the pipe of one wrapper, which is gone the next time. Use `dond daemon` for such builders. The same happens on Linux with the wrapper's socket.
+- `docker buildx create` with the `docker-container` driver stores the endpoint of the command, the pipe of one wrapper, which is gone the next time. Create such builders with the plain docker cli while `dond daemon` runs. The same happens on Linux with the wrapper's socket ([#34](https://github.com/felipecrs/docker-on-docker-shim/issues/34)).
 - A shell in `docker run -it` can drop what is typed in the same few milliseconds as its first resize, which can come right after the prompt with `wsl.exe`.
 
 ## Environment variables
@@ -272,7 +274,7 @@ The listener gives the Docker socket, which is root in WSL, to whoever can open 
 ## Limits
 
 - A client that ignores `DOCKER_HOST` and opens `/var/run/docker.sock` by itself is not covered by the wrapper. The [daemon mode](#daemon-mode) covers it.
-- These run without the proxy, as if the shim were not installed: the `--context` flag, TLS (`--tls*` flags, `DOCKER_TLS_VERIFY`, `DOCKER_TLS`, or a context with TLS material), and endpoints other than `unix://` and `tcp://`, such as `ssh://`.
+- These run without the proxy, as if the shim were not installed: the `--context` flag with a context other than `default`, TLS (`--tls*` flags, `DOCKER_TLS_VERIFY`, `DOCKER_TLS`, or a context with TLS material), and endpoints other than `unix://` and `tcp://`, such as `ssh://`.
 - When the daemon does not know the container the shim runs in, for example a daemon in a sidecar container, the shim changes nothing.
 - The supported storage drivers are `overlay2` and `overlayfs` (the containerd image store). With another one, mounting a path that is not under one of the container's mounts fails with an error that names the driver.
 - As a wrapper, one extra process lives for the duration of each command.

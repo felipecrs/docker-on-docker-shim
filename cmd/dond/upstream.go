@@ -26,7 +26,7 @@ type hostArg struct {
 // resolveUpstream returns the endpoint the command would use, in the docker CLI's own order, and
 // where -H values are. It returns "" when the command must run without the proxy.
 func resolveUpstream(isDocker bool, args []string) (string, []hostArg) {
-	host, configDir := "", os.Getenv("DOCKER_CONFIG")
+	host, configDir, defaultContext := "", os.Getenv("DOCKER_CONFIG"), false
 	var hostArgs []hostArg
 	for i := 0; isDocker && i < len(args); i++ {
 		arg := args[i]
@@ -53,7 +53,11 @@ func resolveUpstream(isDocker bool, args []string) (string, []hostArg) {
 		}
 		switch name {
 		case "-c", "--context":
-			return "", nil
+			// The default context is DOCKER_HOST, or else the default endpoint, so the proxy can serve it.
+			if value != "default" {
+				return "", nil
+			}
+			defaultContext = true
 		case "-H", "--host":
 			host = value
 			hostArgs = append(hostArgs, hostArg{i, prefix})
@@ -66,6 +70,9 @@ func resolveUpstream(isDocker bool, args []string) (string, []hostArg) {
 	}
 	if host == "" {
 		host = os.Getenv("DOCKER_HOST")
+	}
+	if host == "" && defaultContext {
+		host = defaultHost
 	}
 	if host == "" {
 		host = contextHost(configDir)

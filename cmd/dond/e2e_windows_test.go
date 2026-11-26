@@ -71,6 +71,9 @@ func TestEndToEnd(t *testing.T) {
 	t.Run("volume with forward slashes", func(t *testing.T) {
 		expect(t, run(t, "run", "--rm", "-v", filepath.ToSlash(dir)+":/data", image, "cat", "/data/hello world.txt"), "from windows")
 	})
+	t.Run("volume with --context default", func(t *testing.T) {
+		expect(t, run(t, "--context", "default", "run", "--rm", "-v", dir+":/data:ro", image, "cat", "/data/hello world.txt"), "from windows")
+	})
 	t.Run("mount", func(t *testing.T) {
 		expect(t, run(t, "run", "--rm", "--mount", "type=bind,src="+dir+",dst=/data", image, "cat", "/data/hello world.txt"), "from windows")
 	})
