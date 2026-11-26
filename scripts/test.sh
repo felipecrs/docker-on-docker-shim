@@ -46,7 +46,7 @@ temp_dir="$(mktemp -d)"
 readonly temp_dir
 volume_name=""
 readonly daemon_container=dond-test-daemon proxy_container=dond-test-proxy
-trap 'rm -rf "${temp_dir}"; docker rm -f "${daemon_container}" "${proxy_container}" >/dev/null 2>&1 || true; docker image rm -f dond-test-image dond-test-varrun dond-test-s6 >/dev/null 2>&1 || true; if [[ -n "${volume_name}" ]]; then docker volume rm -f "${volume_name}" >/dev/null; fi' EXIT
+trap 'rm -rf "${temp_dir}"; docker rm -f "${daemon_container}" "${proxy_container}" >/dev/null 2>&1 || true; docker image rm -f dond-test-image dond-test-varrun dond-test-s6 >/dev/null 2>&1 || true; docker rm -f buildx_buildkit_dond-test-buildx0 >/dev/null 2>&1 || true; docker volume rm -f buildx_buildkit_dond-test-buildx0_state >/dev/null 2>&1 || true; if [[ -n "${volume_name}" ]]; then docker volume rm -f "${volume_name}" >/dev/null; fi' EXIT
 
 # The daemon knows no container with this ID, as with a sidecar daemon. The shim reads the ID of
 # its container from the resolv.conf that Docker mounts.
@@ -246,6 +246,28 @@ for docker_version in "${docker_versions[@]}"; do
     exit_code=$?
     ${compose} down >/dev/null 2>&1
     exit "${exit_code}"'
+
+  # Each docker command is its own wrapper, so the builder must outlive the socket that created it.
+  echo "Buildx builders created behind the wrapper keep working in later runs"
+  "${docker_args[@]}" "${image_id}" sh -c '
+    if ! docker.orig buildx version >/dev/null 2>&1; then
+      echo "Skipped: no Buildx plugin"
+      exit 0
+    fi
+    set -e
+    builder=dond-test-buildx node=buildx_buildkit_dond-test-buildx0
+    docker buildx create --name "${builder}" --driver docker-container >/dev/null
+    # inspect exits 0 when it cannot reach the builder.
+    docker buildx inspect --bootstrap "${builder}" >/tmp/inspect 2>&1 || true
+    grep -Eq "^Endpoint:[[:space:]]+default$" /tmp/inspect && grep -Eq "^Status:[[:space:]]+running$" /tmp/inspect ||
+      { cat /tmp/inspect; exit 1; }
+    printf "%s\n" "FROM busybox" "RUN echo built" | docker buildx build --builder "${builder}" --quiet --output type=cacheonly - >/dev/null
+    docker buildx rm "${builder}"
+    [ -z "$(docker.orig ps -aq --filter "name=${node}")$(docker.orig volume ls -q --filter "name=${node}")" ]
+    echo "  create --use in a script, through the docker shim inside dond wrap"
+    dond wrap sh -c "docker buildx create --name ${builder} --driver docker-container --use >/dev/null"
+    docker buildx inspect | grep -Eq "^Name:[[:space:]]+${builder}$"
+    docker buildx rm "${builder}"'
 
   echo "Passes through when the daemon does not know the container"
   "${docker_args[@]}" --volume "${temp_dir}/dondtestunknownid/resolv.conf:/etc/resolv.conf:ro" "${image_id}" sh -c '

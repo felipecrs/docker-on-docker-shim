@@ -70,7 +70,7 @@ func run() (int, error) {
 	if os.Getenv("DOND_SHIM_SKIP") == "true" {
 		return execCommand(path, name, args)
 	}
-	upstream, hostArgs := resolveUpstream(filepath.Base(name) == "docker", args)
+	upstream, configDir, hostArgs := resolveUpstream(filepath.Base(name) == "docker", args)
 	debugf("version %s, command %s, upstream %q", version, path, upstream)
 	if upstream == "" || upstream == os.Getenv(proxyEnv) {
 		return execCommand(path, name, args)
@@ -91,7 +91,10 @@ func run() (int, error) {
 	cmd.Args[0] = name
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	cmd.Env = append(os.Environ(), "DOCKER_HOST="+proxyHost, proxyEnv+"="+proxyHost)
-	return runCommand(cmd)
+	code, err := runCommand(cmd)
+	// Any command, since a script can run docker buildx through a nested wrapper, which uses this proxy.
+	fixBuildx(configDir, proxyHost, upstream)
+	return code, err
 }
 
 // findCommand returns the real command for name: DOND_SHIM_DOCKER_PATH for docker, else
