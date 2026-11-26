@@ -18,11 +18,14 @@ FROM scratch AS dond-shim-bin
 COPY --from=build /dond /
 
 
-FROM docker:${DOCKER_VERSION} AS dond-shim
+FROM docker:${DOCKER_VERSION} AS docker
 
-# Install dond-shim
+
+FROM docker AS dond-shim
+
+# Install dond-shim, with COPY instead of RUN so that other platforms build without emulation
 ARG DOCKER_PATH="/usr/local/bin/docker"
-RUN mv -f "${DOCKER_PATH}" "${DOCKER_PATH}.orig"
+COPY --from=docker "${DOCKER_PATH}" "${DOCKER_PATH}.orig"
 COPY --from=dond-shim-bin /dond "${DOCKER_PATH}"
 
 FROM dond-shim AS test

@@ -3,19 +3,23 @@ name: ci
 on:
   push:
     branches: [master]
+    tags: ["v*"]
   pull_request:
     branches: [master]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   go:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
       - run: test -z "$(gofmt -l .)"
@@ -25,8 +29,8 @@ jobs:
   go-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
       - run: go vet ./...
@@ -52,7 +56,7 @@ jobs:
           - "29"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set host Docker storage driver and minimum API version
         run: |
           set -euxo pipefail
@@ -93,7 +97,7 @@ jobs:
           - "rootless"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Docker with userns-remap
         if: matrix.variant == 'userns-remap'
         run: |
@@ -149,9 +153,24 @@ jobs:
             export DOND_SHIM_DEBUG=true
           fi
           scripts/test.sh 29
+  build:
+    uses: ./.github/workflows/build.yaml
+  # The only job that has to be required to merge, as it depends on the others.
   result:
-    needs: [go, go-windows, test, test-daemon-variant]
+    needs: [go, go-windows, test, test-daemon-variant, build]
+    # otherwise it is skipped when one of them fails, and a skipped check counts as passed
+    if: always()
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          echo "All tests passed!"
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: jq --exit-status 'map_values(.result) | ., all(. == "success")' <<<"${NEEDS}"
+  release:
+    if: github.ref_type == 'tag'
+    needs: result
+    uses: ./.github/workflows/build.yaml
+    with:
+      release: true
+    permissions:
+      contents: write # to create the release
+      packages: write # to push the images
