@@ -108,19 +108,29 @@ dond daemon
 
 It serves the proxy at `/var/run/docker.sock` inside the container until `SIGTERM` or `SIGINT`. The container is started the usual way, with `-v /var/run/docker.sock:/var/run/docker.sock` and no extra permission. The daemon must run as root. The main process of the container does not have to.
 
-With [s6-overlay](https://github.com/just-containers/s6-overlay), as a `longrun` service:
+### With s6-overlay
+
+A complete image with [s6-overlay](https://github.com/just-containers/s6-overlay), which runs the daemon as a `longrun` service. The tests build this very example:
 
 ```dockerfile
+FROM ubuntu:latest
+
+ARG S6_OVERLAY_VERSION="3.2.1.0"
+ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz /tmp
+ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-x86_64.tar.xz /tmp
+RUN apt-get update && apt-get install -y xz-utils &&   tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz &&   tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz
+
 COPY --from=ghcr.io/felipecrs/dond-shim-bin:0.10.0 /dond /usr/local/bin/dond
 
-RUN mkdir -p /etc/s6-overlay/s6-rc.d/dond /etc/s6-overlay/s6-rc.d/user/contents.d && \
-  echo longrun >/etc/s6-overlay/s6-rc.d/dond/type && \
-  printf '#!/bin/sh\nexec dond daemon\n' >/etc/s6-overlay/s6-rc.d/dond/run && \
-  chmod +x /etc/s6-overlay/s6-rc.d/dond/run && \
-  touch /etc/s6-overlay/s6-rc.d/user/contents.d/dond
+# A longrun service that runs dond daemon
+RUN mkdir -p /etc/s6-overlay/s6-rc.d/dond /etc/s6-overlay/s6-rc.d/user/contents.d &&   echo longrun >/etc/s6-overlay/s6-rc.d/dond/type &&   printf '#!/bin/sh
+exec dond daemon
+' >/etc/s6-overlay/s6-rc.d/dond/run &&   chmod +x /etc/s6-overlay/s6-rc.d/dond/run &&   touch /etc/s6-overlay/s6-rc.d/user/contents.d/dond
+
+ENTRYPOINT ["/init"]
 ```
 
-Programs that start before the daemon serves reach the real socket, without the mapping.
+s6 stops the daemon with `SIGTERM`, which puts the symlink back. Programs that start before the daemon serves reach the real socket, without the mapping.
 
 To start it faster and with no helper container ([see below](#how-the-daemon-takes-the-place-of-the-socket)), ship this symlink in the image, or mount the socket at `/var/run/docker-host.sock`, as the docker-outside-of-docker feature of devcontainers does:
 
