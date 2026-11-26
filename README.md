@@ -134,7 +134,7 @@ dond daemon
 
 ### How it takes the place of the socket
 
-The socket of the host is a bind mount at `/var/run/docker.sock`, which a container with default permissions cannot unmount, remove or rename. The kernel refuses the rename only in the mount namespace that has the mount, so the daemon asks Docker to run a short helper container that shares its PID namespace and renames `/proc/<daemon pid>/root/run/docker.sock` to `/run/docker-host.sock`. The mount follows the rename. The helper is made from the container's own image, with the shim as entrypoint (or `mv`, when the image does not have the shim at the same path), with no network and no privilege, and is removed when done. It takes 0.1 to 0.5 seconds.
+The socket of the host is a bind mount at `/var/run/docker.sock`, which a container with default permissions cannot unmount, remove or rename. The kernel refuses the rename only in the mount namespace that has the mount, so the daemon asks Docker to run a short helper container that shares its PID namespace and renames `/proc/<daemon pid>/root/run/docker.sock` to `/run/docker-host.sock`. The mount follows the rename. The helper is made from the container's own image, with the shim as entrypoint (or `mv`, when the image does not have the shim at the same path), with no network and no privilege, and is removed when done. It takes 0.1 to 0.7 seconds.
 
 Every route ends in the same layout:
 
