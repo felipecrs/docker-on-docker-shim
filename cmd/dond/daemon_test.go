@@ -99,19 +99,22 @@ func TestMountHolding(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(run, "docker.sock"), "")
-	type mount = struct{ Type, Source, Destination string }
+	type mount = struct {
+		Type, Source, Destination string
+		RW                        bool
+	}
 	for _, tt := range []struct {
 		mount mount
 		want  bool
 	}{
-		{mount{"bind", "/host/run", run}, true},
-		{mount{"volume", "/var/lib/docker/volumes/v/_data", run}, true},
-		{mount{"bind", "/host", root}, true},
-		{mount{"bind", "/host/run", filepath.Join(root, "var", "run")}, true},
-		{mount{"tmpfs", "", run}, false},
+		{mount{"bind", "/host/run", run, true}, true},
+		{mount{"volume", "/var/lib/docker/volumes/v/_data", run, true}, true},
+		{mount{"bind", "/host", root, true}, true},
+		{mount{"bind", "/host/run", filepath.Join(root, "var", "run"), true}, true},
+		{mount{"tmpfs", "", run, true}, false},
 		// The mount of the socket itself, given through the symlink.
-		{mount{"bind", "/var/run/docker.sock", filepath.Join(root, "var", "run", "docker.sock")}, false},
-		{mount{"bind", "/host/runner", run + "ner"}, false},
+		{mount{"bind", "/var/run/docker.sock", filepath.Join(root, "var", "run", "docker.sock"), true}, false},
+		{mount{"bind", "/host/runner", run + "ner", true}, false},
 	} {
 		c := container{Mounts: []mount{tt.mount}}
 		if got := c.mountHolding(run); (got != "") != tt.want {

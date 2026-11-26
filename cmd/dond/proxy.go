@@ -122,12 +122,12 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // mapPath maps a source path in this container, or of Windows, to the host.
-func (p *proxy) mapPath(source string) (string, []nestedMount, error) {
+func (p *proxy) mapPath(source string) (string, bool, []nestedMount, error) {
 	if p.wslRoot != nil {
-		return wslPath(source, p.wslRoot), nil, nil
+		return wslPath(source, p.wslRoot), false, nil, nil
 	}
 	if !strings.HasPrefix(source, "/") {
-		return source, nil, nil
+		return source, false, nil, nil
 	}
 	p.mu.Lock()
 	if !p.inspected || (p.self == nil && !p.chained && p.retry) {
@@ -137,14 +137,14 @@ func (p *proxy) mapPath(source string) (string, []nestedMount, error) {
 	self, chained := p.self, p.chained
 	p.mu.Unlock()
 	if self == nil && !chained {
-		return source, nil, nil
+		return source, false, nil, nil
 	}
 	// Testcontainers mounts the socket that DOCKER_HOST names into its Ryuk container.
 	if source == p.socket && p.network == "unix" {
 		source = p.address
 	}
 	if chained {
-		return source, nil, nil
+		return source, false, nil, nil
 	}
 	return self.hostPath(source)
 }
