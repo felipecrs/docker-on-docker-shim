@@ -73,8 +73,70 @@ jobs:
             export DOND_SHIM_DEBUG=true
           fi
           scripts/test.sh '${{ matrix.docker-version }}'
+  # The daemon under test, not the docker CLI in the image, decides how the daemon mode works.
+  test-daemon-variant:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - "userns-remap"
+          - "rootless"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Docker with userns-remap
+        if: matrix.variant == 'userns-remap'
+        run: |
+          set -euxo pipefail
+          if [ -f /etc/docker/daemon.json ]; then
+            daemon_json=$(cat /etc/docker/daemon.json)
+          else
+            daemon_json='{}'
+          fi
+          echo "${daemon_json}" | jq '.["userns-remap"]="default"' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+          # Root in a remapped container cannot use the socket, so these containers keep the host's.
+          echo "TEST_DOCKER_RUN_ARGS=--userns=host" >>"${GITHUB_ENV}"
+      - name: Set up rootless Docker
+        if: matrix.variant == 'rootless'
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y uidmap slirp4netns docker-ce-rootless-extras
+          if ! grep -q "^$(id -un):" /etc/subuid; then
+            echo "$(id -un):100000:65536" | sudo tee -a /etc/subuid /etc/subgid
+          fi
+          # Ubuntu lets only programs with an AppArmor profile create user namespaces.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo systemctl disable --now docker.service docker.socket
+          runtime_dir="/run/user/$(id -u)"
+          sudo mkdir -p "${runtime_dir}"
+          sudo chown "$(id -u):$(id -g)" "${runtime_dir}"
+          XDG_RUNTIME_DIR="${runtime_dir}" nohup dockerd-rootless.sh >"${RUNNER_TEMP}/dockerd-rootless.log" 2>&1 &
+          for _ in $(seq 60); do
+            if [ -S "${runtime_dir}/docker.sock" ]; then
+              break
+            fi
+            sleep 1
+          done
+          if ! DOCKER_HOST="unix://${runtime_dir}/docker.sock" docker version; then
+            cat "${RUNNER_TEMP}/dockerd-rootless.log"
+            exit 1
+          fi
+          echo "DOCKER_HOST=unix://${runtime_dir}/docker.sock" >>"${GITHUB_ENV}"
+      - name: Show host Docker information
+        run: |
+          docker version
+          docker info
+      - name: Run tests with ${{ matrix.variant }}
+        run: |
+          if [[ '${{ runner.debug }}' == 1 ]]; then
+            export DEBUG=true
+            export DOND_SHIM_DEBUG=true
+          fi
+          scripts/test.sh 29
   result:
-    needs: [go, test]
+    needs: [go, test, test-daemon-variant]
     runs-on: ubuntu-latest
     steps:
       - run: |

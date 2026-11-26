@@ -231,6 +231,8 @@ func (p *proxy) runHelper(host map[string]any, entrypoint, cmd []string) (int, e
 	}
 
 	host["AutoRemove"], host["NetworkMode"] = true, "none"
+	// The same user namespace, so that root in the helper is the user that owns this container.
+	host["UsernsMode"] = p.self.HostConfig.UsernsMode
 	var created struct {
 		ID string `json:"Id"`
 	}

@@ -16,6 +16,7 @@ type container struct {
 	ResolvConfPath string
 	GraphDriver    struct{ Data map[string]string }
 	Mounts         []struct{ Type, Source, Destination string }
+	HostConfig     struct{ UsernsMode string }
 }
 
 // nestedMount is a mount of the container inside a requested source: source on the host, at rel
