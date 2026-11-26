@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -57,10 +58,14 @@ func newProxy(upstream, socket string) *proxy {
 			return dialUpstream(ctx, p.network, p.address)
 		},
 		DisableCompression: true,
+		// An idle connection through wsl.exe keeps a process, and WSL, running.
+		IdleConnTimeout: 90 * time.Second,
 	}
 	p.client = &http.Client{Transport: transport}
 	if p.network == "wsl" {
 		p.wslRoot = wslRoot()
+		// Pooled connections through wsl.exe would never give way to the listener under steady use.
+		onListenerFound(transport.CloseIdleConnections)
 	}
 	p.reverse = &httputil.ReverseProxy{
 		Rewrite:       func(r *httputil.ProxyRequest) { r.Out.URL.Scheme, r.Out.URL.Host = "http", "docker" },

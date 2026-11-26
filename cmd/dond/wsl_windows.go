@@ -30,6 +30,11 @@ const (
 	// probeTimeout bounds the wait for the listener: a connection to a port nobody listens on is not
 	// refused, it times out after 30 seconds. A connection takes about a millisecond.
 	probeTimeout = 50 * time.Millisecond
+	// vsockTimeout bounds a connection to the listener once found, which can go away with WSL.
+	vsockTimeout = time.Second
+	// reprobeAfter is how long a long-running proxy, such as dond daemon, goes without the listener
+	// before it looks for it again.
+	reprobeAfter = 30 * time.Second
 	// spareDelay is how long the probe may take before wsl.exe starts, as it is the slow part.
 	spareDelay = 10 * time.Millisecond
 	// spares is how many dial-stdio wait ahead. docker run uses three connections, but a third one
@@ -40,10 +45,19 @@ const (
 // transport reaches the Docker daemon in WSL, through a Hyper-V socket when a listener in WSL
 // answers on vsockPort, or else through `docker system dial-stdio` in WSL for each connection.
 type transport struct {
-	probed chan struct{} // closed when vm is known
-	vm     *guid.GUID    // the VM with the listener, or nil
-	spares chan spare    // dial-stdio started ahead of the need, as wsl.exe takes 100 ms to start
-	start  time.Time
+	start     time.Time
+	firstDone chan struct{}            // closed when the first probe ended
+	spares    chan spare               // dial-stdio started ahead of the need, as wsl.exe takes 100 ms to start
+	dialStdio func() (net.Conn, error) // starts a dial-stdio
+
+	mu       sync.Mutex
+	vm       *guid.GUID // the VM with the listener, or nil
+	probedAt time.Time
+	probing  bool
+	sparing  bool
+	stop     chan struct{} // closed when the spares stop
+	found    []func()      // called when a later probe finds the listener
+	epoch    int           // counts the starts of spares, so that a spare of an earlier start is dropped
 }
 
 type spare struct {
@@ -53,27 +67,28 @@ type spare struct {
 
 // wslTransport starts to reach WSL at its first call.
 var wslTransport = sync.OnceValue(func() *transport {
-	t := &transport{probed: make(chan struct{}), spares: make(chan spare, spares), start: time.Now()}
-	go t.probe()
+	t := newTransport(dialStdio)
 	go func() {
 		select {
-		case <-t.probed:
-			if t.vm == nil {
-				t.addSpares()
-			}
+		case <-t.firstDone:
 		case <-time.After(spareDelay):
-			t.addSpares()
-			if <-t.probed; t.vm != nil {
-				for range spares {
-					if s := <-t.spares; s.conn != nil {
-						s.conn.Close()
-					}
-				}
-			}
+			t.startSpares()
+			<-t.firstDone
+		}
+		if t.listener() == nil {
+			t.startSpares()
+		} else {
+			t.stopSpares()
 		}
 	}()
 	return t
 })
+
+func newTransport(dialStdio func() (net.Conn, error)) *transport {
+	t := &transport{start: time.Now(), firstDone: make(chan struct{}), spares: make(chan spare, spares), dialStdio: dialStdio}
+	t.probe(t.firstDone)
+	return t
+}
 
 func dialUpstream(ctx context.Context, network, address string) (net.Conn, error) {
 	if network != "wsl" {
@@ -84,41 +99,136 @@ func dialUpstream(ctx context.Context, network, address string) (net.Conn, error
 
 func (t *transport) dial(ctx context.Context) (net.Conn, error) {
 	select {
-	case <-t.probed:
+	case <-t.firstDone:
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	if t.vm != nil {
-		return winio.Dial(ctx, vsockAddr(*t.vm))
+	if vm := t.listener(); vm != nil {
+		conn, err := dialVsock(*vm, vsockTimeout)
+		if err == nil {
+			return conn, nil
+		}
+		debugf("listener on vsock port %d of VM %s: %v, using wsl.exe", vsockPort, vm, err)
+		t.mu.Lock()
+		if t.vm != nil && *t.vm == *vm {
+			t.vm = nil
+		}
+		t.mu.Unlock()
+		// WSL may have restarted, with a new VM.
+		t.probe(nil)
+	} else if t.stale() {
+		t.probe(nil)
 	}
-	select {
-	case s := <-t.spares:
-		debugf("connection through wsl.exe %v after the start", time.Since(t.start))
-		go t.addSpare()
-		return s.conn, s.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	stopped, epoch := t.startSpares()
+	for {
+		select {
+		case s := <-t.spares:
+			go t.addSpare(epoch)
+			if c, ok := s.conn.(*stdioConn); ok && c.exited() {
+				debugf("wsl.exe of a spare connection ended, taking another")
+				_ = c.Close()
+				continue
+			}
+			debugf("connection through wsl.exe %v after the start", time.Since(t.start))
+			return s.conn, s.err
+		case <-stopped:
+			// A probe found the listener meanwhile.
+			return t.dial(ctx)
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
+}
+
+// onListenerFound calls f each time a probe after the first one finds the listener.
+func onListenerFound(f func()) {
+	t := wslTransport()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.found = append(t.found, f)
+}
+
+func (t *transport) listener() *guid.GUID {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.vm
+}
+
+func (t *transport) stale() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return !t.probing && time.Since(t.probedAt) > reprobeAfter
 }
 
 func vsockAddr(vm guid.GUID) *winio.HvsockAddr {
 	return &winio.HvsockAddr{VMID: vm, ServiceID: winio.VsockServiceID(vsockPort)}
 }
 
-// probe looks for the listener in every running VM, as the ID of the VM of WSL is known only to
-// the system.
-func (t *transport) probe() {
-	defer func() {
-		if t.vm == nil {
+// dialVsock connects to the listener in vm, or gives up after timeout, as go-winio ignores the
+// context.
+func dialVsock(vm guid.GUID, timeout time.Duration) (net.Conn, error) {
+	done := make(chan spare, 1)
+	go func() {
+		conn, err := winio.Dial(context.Background(), vsockAddr(vm))
+		done <- spare{conn, err}
+	}()
+	select {
+	case s := <-done:
+		if s.err != nil {
+			return nil, s.err
+		}
+		return s.conn, nil
+	case <-time.After(timeout):
+		go func() {
+			// go-winio returns a nil *HvsockConn with its errors.
+			if s := <-done; s.err == nil {
+				s.conn.Close()
+			}
+		}()
+		return nil, fmt.Errorf("no answer after %v", timeout)
+	}
+}
+
+// probe looks for the listener in every running VM in the background, as the ID of the VM of WSL is
+// known only to the system, and closes done when it ends. It does nothing while a probe runs.
+func (t *transport) probe(done chan struct{}) {
+	t.mu.Lock()
+	if t.probing {
+		t.mu.Unlock()
+		return
+	}
+	t.probing = true
+	t.mu.Unlock()
+	go func() {
+		vm := findListener()
+		t.mu.Lock()
+		t.vm, t.probedAt, t.probing = vm, time.Now(), false
+		t.mu.Unlock()
+		if vm == nil {
 			debugf("no listener on vsock port %d after %v, using wsl.exe", vsockPort, time.Since(t.start))
 		} else {
-			debugf("listener on vsock port %d of VM %s after %v", vsockPort, t.vm, time.Since(t.start))
+			debugf("listener on vsock port %d of VM %s after %v", vsockPort, vm, time.Since(t.start))
+			// A long-running proxy that found the listener again needs no wsl.exe.
+			if done == nil {
+				t.stopSpares()
+				t.mu.Lock()
+				found := t.found
+				t.mu.Unlock()
+				for _, f := range found {
+					f()
+				}
+			}
 		}
-		close(t.probed)
+		if done != nil {
+			close(done)
+		}
 	}()
+}
+
+func findListener() *guid.GUID {
 	key, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows NT\CurrentVersion\HostComputeService\VolatileStore\ComputeSystem`, registry.ENUMERATE_SUB_KEYS)
 	if err != nil {
-		return
+		return nil
 	}
 	names, _ := key.ReadSubKeyNames(-1)
 	key.Close()
@@ -129,31 +239,72 @@ func (t *transport) probe() {
 			continue
 		}
 		go func() {
-			if conn, err := winio.Dial(context.Background(), vsockAddr(vm)); err == nil {
+			if conn, err := dialVsock(vm, probeTimeout); err == nil {
 				conn.Close()
 				found <- vm
 			}
 		}()
 	}
 	if len(names) == 0 {
-		return
+		return nil
 	}
 	select {
 	case vm := <-found:
-		t.vm = &vm
+		return &vm
 	case <-time.After(probeTimeout):
+		return nil
 	}
 }
 
-func (t *transport) addSpares() {
-	for range spares {
-		go t.addSpare()
+// startSpares keeps spares connections waiting, unless it does already. It returns a channel closed
+// when they stop, and the epoch for addSpare.
+func (t *transport) startSpares() (chan struct{}, int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.sparing {
+		t.sparing, t.stop = true, make(chan struct{})
+		t.epoch++
+		for range spares {
+			go t.addSpare(t.epoch)
+		}
+	}
+	return t.stop, t.epoch
+}
+
+// stopSpares ends the spares, and the ones still starting once they started.
+func (t *transport) stopSpares() {
+	t.mu.Lock()
+	if t.sparing {
+		t.sparing = false
+		close(t.stop)
+	}
+	t.mu.Unlock()
+	for {
+		select {
+		case s := <-t.spares:
+			if s.conn != nil {
+				s.conn.Close()
+			}
+		default:
+			return
+		}
 	}
 }
 
-func (t *transport) addSpare() {
-	conn, err := dialStdio()
-	t.spares <- spare{conn, err}
+func (t *transport) addSpare(epoch int) {
+	conn, err := t.dialStdio()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.sparing && t.epoch == epoch {
+		select {
+		case t.spares <- spare{conn, err}:
+			return
+		default:
+		}
+	}
+	if conn != nil {
+		conn.Close()
+	}
 }
 
 // dialStdio starts `docker system dial-stdio` in the distribution of WSL.
@@ -170,6 +321,15 @@ func dialStdio() (net.Conn, error) {
 	cmd := exec.Command(exe, args...)
 	// wsl.exe prints its own errors, such as an unknown distribution, in UTF-16 otherwise.
 	cmd.Env = append(os.Environ(), "WSL_UTF8=1")
+	c, err := startStdio(cmd)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// startStdio starts cmd as a connection through its standard streams.
+func startStdio(cmd *exec.Cmd) (*stdioConn, error) {
 	// Without a console, Ctrl+C in the console of the command does not end the connection.
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.DETACHED_PROCESS}
 	c := &stdioConn{cmd: cmd}
@@ -204,6 +364,18 @@ type stdioConn struct {
 
 	failure    sync.Once
 	failureErr error
+}
+
+// exited tells whether wsl.exe ended, as when WSL stops. The pid stays valid: os.Process keeps a
+// handle to the process until Wait.
+func (c *stdioConn) exited() bool {
+	process, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(c.cmd.Process.Pid))
+	if err != nil {
+		return true
+	}
+	defer windows.CloseHandle(process)
+	event, err := windows.WaitForSingleObject(process, 0)
+	return err == nil && event == windows.WAIT_OBJECT_0
 }
 
 func (c *stdioConn) Read(b []byte) (int, error) {

@@ -54,6 +54,8 @@ func dialUpstream(ctx context.Context, network, address string) (net.Conn, error
 // The drives of Windows are not translated outside Windows.
 func wslRoot() func() string { return nil }
 
+func onListenerFound(func()) {}
+
 // runCommand runs the command, passes signals on to it, and returns its exit code.
 func runCommand(cmd *exec.Cmd) (int, error) {
 	signals := make(chan os.Signal, 4)
