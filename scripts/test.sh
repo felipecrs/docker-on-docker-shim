@@ -427,7 +427,14 @@ for docker_version in "${docker_versions[@]}"; do
       >"${temp_dir}/s6.Dockerfile"
   grep -q "^COPY --from=dond-test-image /usr/local/bin/docker /usr/local/bin/dond$" "${temp_dir}/s6.Dockerfile"
   echo "COPY --from=dond-test-image /usr/local/bin/docker.orig /usr/local/bin/docker" >>"${temp_dir}/s6.Dockerfile"
-  docker build --quiet --tag dond-test-s6 --file "${temp_dir}/s6.Dockerfile" "${temp_dir}/s6" >/dev/null
+  # Again on a failure, as the download of s6-overlay from GitHub times out now and then.
+  for attempt in 1 2 3; do
+    if docker build --quiet --tag dond-test-s6 --file "${temp_dir}/s6.Dockerfile" "${temp_dir}/s6" >/dev/null; then
+      break
+    elif [[ "${attempt}" == 3 ]]; then
+      exit 1
+    fi
+  done
   run_daemon_container "${host_socket}:/var/run/docker.sock" dond-test-s6
   wait_for_start_lines 1
   in_daemon_container docker run --rm --mount type=bind,source=/etc/s6-overlay/s6-rc.d/dond/type,target=/t busybox \
